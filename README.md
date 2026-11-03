@@ -20,7 +20,11 @@ profiles, streaks and the leaderboard.
   assigns Team A / Team B.
 - **Player profiles & Elo** — starting Elo 1000, team-based Elo with
   K=40 for the first 10 matches and K=24 after, peak tracking, win/loss/draw
-  totals, signed streaks, configurable rank tiers.
+  totals, signed streaks, and configurable rank tiers. Each rank band is split
+  into three divisions (e.g. `SILVER II`) and crossing a division/rank
+  boundary announces in the match channel.
+- **Per-player map statistics** — confirmed matches record wins/losses/draws
+  per map and the profile shows a TOP MAPS panel with map-specific win rate.
 - **Map pool** — the 14 classic Power League maps seeded by default. Admins can
   add/remove/toggle maps and set optional game modes. Selection avoids recently
   used maps when alternatives exist.
@@ -42,6 +46,13 @@ profiles, streaks and the leaderboard.
   escalated, and only moderators decide on cooldowns (no auto-punishment).
 - **Match history & leaderboard** — paginated history per player, default
   competitive leaderboard filter by minimum matches (configurable).
+- **Public match logs** — a configurable logs channel receives one public
+  embed per match that tracks its lifecycle and final result (no in-game
+  TeamCode is exposed there). Configure via `/scrim logs <channel>` or
+  `LOGS_CHANNEL_ID`.
+- **Captain draft matchmaking** — optional mode (`/scrim matchmaking draft`)
+  where the two highest-Elo players captain and snake-pick (A, B, B, A) their
+  teams from the pool; `auto` keeps automatic Elo-balanced teams.
 - **Audit log** — every admin action is recorded.
 
 ---
@@ -54,10 +65,10 @@ src/
   commands/          player + admin slash commands
   interactions/      buttons, modals, select menus
   matchmaking/       queueManager, teamBalancer, mapSelector
-  matches/           matchManager, resultVoting
+  matches/           matchManager, draftManager, resultVoting
   elo/               eloCalculator, rankManager
   database/          SQLite connection, schema, repositories
-  services/          timerManager (persisted deadlines), mutex, auditLogger
+  services/          timerManager (persisted deadlines), matchLogs, auditLogger
   config/            environment settings
   format.ts          shared embeds / action rows
 ```
@@ -129,12 +140,14 @@ never has its token wiped. Values are resolved in priority order:
 | `DISCORD_APPLICATION_ID` | — | Application ID (required). |
 | `DISCORD_GUILD_ID` | — | Guild ID (required). |
 | `QUEUE_CHANNEL_ID` | — | Channel for the panel / staff pings. |
+| `LOGS_CHANNEL_ID` | — | Optional channel for public match logs (or `/scrim logs`). |
 | `STAFF_ROLE_ID` | — | Role allowed to use admin commands. |
 | `DATABASE_PATH` | `./data/scrims.db` | SQLite file location. |
 | `QUEUE_SIZE` | `6` | Players needed to start a match. |
 | `MIN_ELO` / `MAX_ELO` | unset | Optional queue Elo range. |
 | `TEAM_BALANCE_TOLERANCE` | `40` | Max average-Elo gap vs. the best split still considered. |
 | `MATCH_FORMAT` | `best_of_1` | `best_of_1` (default) or `best_of_3`. |
+| `MATCHMAKING_MODE` | `auto` | `auto` (balanced teams) or `draft` (captain draft). Runtime-togglable via `/scrim matchmaking`. |
 | `MAP_ROTATION_MODE` | `unique` | `unique` avoids recently used maps, `random` is fully random. |
 | `TIMER_TEAMCODE` | `300` | Seconds to submit a TeamCode, else the match is cancelled. |
 | `TIMER_READY` | `300` | Seconds for readiness after the TeamCode is posted. |
@@ -171,6 +184,8 @@ never has its token wiped. Values are resolved in priority order:
 | `/scrim map add/remove/toggle/gamemode` | Manage the map pool. |
 | `/scrim cooldown <player> <minutes> [reason]` | Apply a matchmaking cooldown. |
 | `/scrim resetcode <match_id>` | Reset a TeamCode for re-submission. |
+| `/scrim matchmaking <auto\|draft>` | Switch between balanced-team matchmaking and captain draft. |
+| `/scrim logs <channel>` | Set the channel that receives public match logs. |
 | `/scrim dodge <match_id> <player> <cooldown\|clear> [minutes]` | Moderator decision on a dodge report. |
 | `/scrim stats` | Server-wide statistics. |
 | `/scrim audit [limit]` | Recent audit log entries. |
@@ -204,16 +219,18 @@ npm run build         # tsc (compiled output for npm run start:prod)
 npm test              # vitest run
 ```
 
-Unit tests cover the team balancer, Elo math, result-vote evaluation, map
-selection, repositories/persistence, and timer recovery.
+Unit tests cover the team balancer, captain draft, Elo math, rank
+divisions, result-vote evaluation, map selection, repositories/persistence,
+and timer recovery.
 
 ---
 
 ## Roadmap (Power League extras)
 
-- Brawler ban/pick phase with team captains
-- Map-specific win rates, head-to-head statistics
-- Automatic captain nomination (highest Elo / most matches)
+- Brawler ban/pick phase (optional; not enforced in-game)
+- Head-to-head player statistics
+- Seasonal tracking (season wins, seasonal peak) — schema columns are already
+  migrated (`season_wins`, `season_losses`, `season_draws`, `season_peak_elo`)
 
 These are intentionally optional and out of the way of the core scrim flow.
 

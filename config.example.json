@@ -4,6 +4,7 @@
   "DISCORD_GUILD_ID": "PASTE_GUILD_ID_HERE",
 
   "QUEUE_CHANNEL_ID": "",
+  "LOGS_CHANNEL_ID": "",
   "STAFF_ROLE_ID": "",
 
   "DATABASE_PATH": "./data/scrims.db",
@@ -13,6 +14,7 @@
   "MAX_ELO": "",
   "TEAM_BALANCE_TOLERANCE": 40,
   "MATCH_FORMAT": "best_of_1",
+  "MATCHMAKING_MODE": "auto",
   "MAP_ROTATION_MODE": "unique",
 
   "TIMER_TEAMCODE": 300,
