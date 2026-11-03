@@ -2,7 +2,72 @@ import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
 
-dotenv.config();
+/**
+ * Configuration sources, in priority order (highest wins):
+ *   1. shell / process environment (e.g. secrets injected by a host)
+ *   2. a local, gitignored `config.json` file (recommended for the token and
+ *      client id on a panel host that pulls the repo every restart)
+ *   3. an optional legacy `.env` file
+ *   4. built-in defaults
+ *
+ * Credentials MUST live in gitignored files (`config.json`, `.env`) or in
+ * environment variables — never committed to the repository.
+ */
+
+function configFilePath(): string {
+  return process.env.CONFIG_FILE || './config.json';
+}
+
+function dotenvFilePath(): string {
+  return process.env.DOTENV_FILE || './.env';
+}
+
+type ConfigMap = Record<string, string>;
+
+function readJson<T>(filePath: string): T | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the gitignored config.json (if any) into an env-style map.
+ *
+ * Top-level keys mirror env var names exactly (e.g. `"DISCORD_BOT_TOKEN"`).
+ * Nested value-types are flattened the same way as legacy env files, so
+ * `"RANK_BRONZE": 1100` becomes the string `"1100"`.
+ */
+function loadFileConfig(): ConfigMap {
+  const raw = readJson<Record<string, unknown>>(path.resolve(process.cwd(), configFilePath()));
+  if (!raw) return {};
+  const flat: ConfigMap = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === null || value === undefined || typeof value === 'object') continue;
+    flat[key] = String(value);
+  }
+  return flat;
+}
+
+/** Parses the legacy .env file without mutating process.env. */
+function loadDotEnv(): ConfigMap {
+  try {
+    const parsed = dotenv.parse(fs.readFileSync(path.resolve(process.cwd(), dotenvFilePath()), 'utf8'));
+    return { ...parsed };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Merges all sources into a single env-style map.
+ * Priority: passed/process env > config.json > .env.
+ */
+function envFor(env?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const shellEnv = env ?? process.env;
+  return { ...loadDotEnv(), ...loadFileConfig(), ...shellEnv } as NodeJS.ProcessEnv;
+}
 
 function optionalInt(name: string, fallback: number, env: NodeJS.ProcessEnv): number {
   const raw = env[name];
@@ -51,44 +116,46 @@ export interface Settings {
   leaderboardMinMatches: number;
 }
 
-export function loadSettings(env: NodeJS.ProcessEnv = process.env): Settings {
-  const dbPath = optionalStr('DATABASE_PATH', './data/scrims.db', env);
+export function loadSettings(env?: NodeJS.ProcessEnv): Settings {
+  // Merge config.json + .env + the explicit/process environment.
+  const merged = envFor(env);
+  const dbPath = optionalStr('DATABASE_PATH', './data/scrims.db', merged);
   const absoluteDbPath = path.isAbsolute(dbPath) ? dbPath : path.resolve(process.cwd(), dbPath);
   if (!fs.existsSync(path.dirname(absoluteDbPath))) {
     fs.mkdirSync(path.dirname(absoluteDbPath), { recursive: true });
   }
 
-  const formatRaw = optionalStr('MATCH_FORMAT', 'best_of_1', env);
+  const formatRaw = optionalStr('MATCH_FORMAT', 'best_of_1', merged);
   const matchFormat: MatchFormat = formatRaw === 'best_of_3' ? 'best_of_3' : 'best_of_1';
 
   return {
-    discordToken: optionalStr('DISCORD_BOT_TOKEN', '', env),
-    applicationId: optionalStr('DISCORD_APPLICATION_ID', '', env),
-    guildId: optionalStr('DISCORD_GUILD_ID', '', env),
-    queueChannelId: optionalStr('QUEUE_CHANNEL_ID', env),
-    staffRoleId: optionalStr('STAFF_ROLE_ID', env),
+    discordToken: optionalStr('DISCORD_BOT_TOKEN', '', merged),
+    applicationId: optionalStr('DISCORD_APPLICATION_ID', '', merged),
+    guildId: optionalStr('DISCORD_GUILD_ID', '', merged),
+    queueChannelId: optionalStr('QUEUE_CHANNEL_ID', merged),
+    staffRoleId: optionalStr('STAFF_ROLE_ID', merged),
     databasePath: absoluteDbPath,
-    queueSize: optionalInt('QUEUE_SIZE', 6, env),
-    minElo: optionalStr('MIN_ELO', env) !== undefined ? optionalInt('MIN_ELO', 0, env) : undefined,
-    maxElo: optionalStr('MAX_ELO', env) !== undefined ? optionalInt('MAX_ELO', 10000, env) : undefined,
-    teamBalanceTolerance: optionalInt('TEAM_BALANCE_TOLERANCE', 40, env),
+    queueSize: optionalInt('QUEUE_SIZE', 6, merged),
+    minElo: optionalStr('MIN_ELO', merged) !== undefined ? optionalInt('MIN_ELO', 0, merged) : undefined,
+    maxElo: optionalStr('MAX_ELO', merged) !== undefined ? optionalInt('MAX_ELO', 10000, merged) : undefined,
+    teamBalanceTolerance: optionalInt('TEAM_BALANCE_TOLERANCE', 40, merged),
     matchFormat,
-    mapRotationMode: optionalStr('MAP_ROTATION_MODE', env) === 'random' ? 'random' : 'unique',
+    mapRotationMode: optionalStr('MAP_ROTATION_MODE', merged) === 'random' ? 'random' : 'unique',
     timers: {
-      teamCode: optionalInt('TIMER_TEAMCODE', 300, env),
-      ready: optionalInt('TIMER_READY', 300, env),
-      match: optionalInt('TIMER_MATCH', 900, env),
-      vote: optionalInt('TIMER_VOTE', 900, env),
-      faultReport: optionalInt('TIMER_FAULT_REPORT', 300, env),
+      teamCode: optionalInt('TIMER_TEAMCODE', 300, merged),
+      ready: optionalInt('TIMER_READY', 300, merged),
+      match: optionalInt('TIMER_MATCH', 900, merged),
+      vote: optionalInt('TIMER_VOTE', 900, merged),
+      faultReport: optionalInt('TIMER_FAULT_REPORT', 300, merged),
     },
     ranks: [
-      { name: 'Bronze', threshold: optionalInt('RANK_BRONZE', 1000, env) },
-      { name: 'Silver', threshold: optionalInt('RANK_SILVER', 1100, env) },
-      { name: 'Gold', threshold: optionalInt('RANK_GOLD', 1250, env) },
-      { name: 'Diamond', threshold: optionalInt('RANK_DIAMOND', 1400, env) },
-      { name: 'Mythic', threshold: optionalInt('RANK_MYTHIC', 1600, env) },
-      { name: 'Legendary', threshold: optionalInt('RANK_LEGENDARY', 1800, env) },
+      { name: 'Bronze', threshold: optionalInt('RANK_BRONZE', 1000, merged) },
+      { name: 'Silver', threshold: optionalInt('RANK_SILVER', 1100, merged) },
+      { name: 'Gold', threshold: optionalInt('RANK_GOLD', 1250, merged) },
+      { name: 'Diamond', threshold: optionalInt('RANK_DIAMOND', 1400, merged) },
+      { name: 'Mythic', threshold: optionalInt('RANK_MYTHIC', 1600, merged) },
+      { name: 'Legendary', threshold: optionalInt('RANK_LEGENDARY', 1800, merged) },
     ],
-    leaderboardMinMatches: optionalInt('LEADERBOARD_MIN_MATCHES', 0, env),
+    leaderboardMinMatches: optionalInt('LEADERBOARD_MIN_MATCHES', 0, merged),
   };
 }

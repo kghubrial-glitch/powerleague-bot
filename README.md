@@ -83,12 +83,11 @@ src/
 
 ```bash
 npm install
-cp .env.example .env
+cp config.example.json config.json
 # fill in DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID, DISCORD_GUILD_ID,
-# QUEUE_CHANNEL_ID, STAFF_ROLE_ID (see Config below)
+# QUEUE_CHANNEL_ID, STAFF_ROLE_ID in config.json
 
-npm run build
-npm start        # or: npm run dev
+npm start        # runs the TypeScript entry directly — no build step needed
 ```
 
 The first run registers all slash commands for the configured guild and
@@ -102,9 +101,17 @@ creates the SQLite database file (`./data/scrims.db`).
 
 ---
 
-## Configuration (`.env`)
+## Configuration
 
-| Variable | Default | Description |
+Credentials and settings live in a gitignored **`config.json`** (template:
+`config.example.json`) so a hosting panel that does `git pull` every restart
+never has its token wiped. Values are resolved in priority order:
+
+**shell environment > `config.json` > legacy `.env` file**
+
+`config.json` keys mirror env var names (all caps, flat):
+
+| Key | Default | Description |
 | --- | --- | --- |
 | `DISCORD_BOT_TOKEN` | — | Bot token (required). |
 | `DISCORD_APPLICATION_ID` | — | Application ID (required). |
@@ -181,7 +188,7 @@ fault reporting so moderators can review.
 
 ```bash
 npm run typecheck     # tsc --noEmit
-npm run build         # tsc
+npm run build         # tsc (compiled output for npm run start:prod)
 npm test              # vitest run
 ```
 

@@ -10,11 +10,17 @@ TypeScript + discord.js + better-sqlite3.
 - `npm run typecheck` — `tsc --noEmit`
 - `npm run build` — `tsc` (out to `dist/`)
 - `npm test` — `vitest run` (unit tests under `tests/unit/`)
-- `npm run dev` — `tsx src/index.ts`
+- `npm start` — `tsx src/index.ts` (no build step; used by the hosting panel)
+- `npm run dev` — `tsx watch src/index.ts`
 
 ## Conventions
 
 - **Strict TypeScript**, CommonJS modules, `rootDir: src`, `outDir: dist`.
+- Config is resolved by `src/config/settings.ts` in priority order:
+  `process.env` > gitignored `config.json` (`CONFIG_FILE`, defaults to
+  `./config.json`, keys are env-var names) > legacy `.env` (`DOTENV_FILE`) >
+  defaults. `config.json` is intentionally untracked so host `git pull`s never
+  wipe credentials. Always create `config.example.json` when adding a setting.
 - Database schema lives in `src/database/connection.ts` (`migrate()`).
   Default maps are seeded by `initDatabase` → `maps.ensureDefaults()`, so tests
   that construct `Repositories` directly must call `ensureDefaults()` too.
