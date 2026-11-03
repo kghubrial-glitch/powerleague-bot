@@ -144,8 +144,11 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
   if (match.map) details.push(`**MAP:** ${match.map}${match.game_mode ? ` (${match.game_mode})` : ''}`);
   details.push(`**FORMAT:** ${match.format === 'best_of_3' ? 'Best of 3' : 'Best of 1'}`);
   if (match.status === 'awaiting_ready' || match.status === 'in_progress') {
-    const total = match.format === 'best_of_3' ? 3 : 1;
-    details.push(`**SERIES:** ${match.team_a_score}-${match.team_b_score} (first to ${match.format === 'best_of_3' ? 2 : 1} of ${total})`);
+    if (match.format === 'best_of_3') {
+      details.push(`**SERIES:** ${match.team_a_score}-${match.team_b_score} (first to 2 of 3)`);
+    } else {
+      details.push(`**SERIES:** ${match.team_a_score}-${match.team_b_score} (single game)`);
+    }
   }
   if (match.status === 'confirmed' || match.status === 'disputed') {
     details.push(`**FINAL SCORE:** ${match.team_a_score} – ${match.team_b_score}`);

@@ -30,6 +30,8 @@ profiles, streaks and the leaderboard.
   modal; the first valid submission is locked in, staff can reset it.
 - **Readiness check** — each player presses READY after joining; once all six
   are ready the match starts and the series deadline begins.
+- **Single-game matches (default)** — each match is one game (Best of 1). A
+  Best-of-3 mode is available via `MATCH_FORMAT=best_of_3`.
 - **Result voting** — a participant proposes the winner; the six players vote
   privately. A result needs **4 of 6** matching votes **including at least one
   vote from each team**. Unresolved votes are marked disputed for staff.
@@ -113,7 +115,7 @@ creates the SQLite database file (`./data/scrims.db`).
 | `QUEUE_SIZE` | `6` | Players needed to start a match. |
 | `MIN_ELO` / `MAX_ELO` | unset | Optional queue Elo range. |
 | `TEAM_BALANCE_TOLERANCE` | `40` | Max average-Elo gap vs. the best split still considered. |
-| `MATCH_FORMAT` | `best_of_3` | `best_of_3` or `best_of_1`. |
+| `MATCH_FORMAT` | `best_of_1` | `best_of_1` (default) or `best_of_3`. |
 | `MAP_ROTATION_MODE` | `unique` | `unique` avoids recently used maps, `random` is fully random. |
 | `TIMER_TEAMCODE` | `300` | Seconds to submit a TeamCode, else the match is cancelled. |
 | `TIMER_READY` | `300` | Seconds for readiness after the TeamCode is posted. |

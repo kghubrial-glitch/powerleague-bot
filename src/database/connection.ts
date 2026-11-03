@@ -42,7 +42,7 @@ export function migrate(db: ScrimDatabase): void {
       team_b_avg_elo           REAL,
       map                      TEXT,
       game_mode                TEXT,
-      format                   TEXT NOT NULL DEFAULT 'best_of_3',
+      format                   TEXT NOT NULL DEFAULT 'best_of_1',
       channel_id               TEXT,
       message_id               TEXT,
       team_code                TEXT,
