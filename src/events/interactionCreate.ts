@@ -96,6 +96,8 @@ export function registerInteractionEvents(ctx: AppContext): void {
         const ci = interaction as ChatInputCommandInteraction;
         if (ci.commandName === 'scrim') {
           await ctx.admin.handle(ci);
+        } else if (ci.commandName === 'clear') {
+          await ctx.admin.handleTopLevel(ci.commandName, ci);
         } else {
           await ctx.commands.handle(ci.commandName, ci);
         }

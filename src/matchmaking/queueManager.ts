@@ -170,4 +170,69 @@ export class QueueManager {
     await this.refreshPanel();
     await this.deps.onFull(claimed);
   }
+
+  // -------------------------------------------------------------------------
+  // Staff controls
+  // -------------------------------------------------------------------------
+
+  /**
+   * Removes every player from the queue and tells them why. Returns the number
+   * of players removed. The panel is refreshed afterwards.
+   */
+  async clearQueue(reason = 'The queue was cleared by a moderator.'): Promise<number> {
+    return this.mutex.run(async () => {
+      const entries = this.ctx.db.repos.queue.list();
+      if (entries.length === 0) {
+        await this.refreshPanel();
+        return 0;
+      }
+      for (const entry of entries) {
+        await this.notifyLeft(entry, reason);
+      }
+      this.ctx.db.repos.queue.clear();
+      await this.refreshPanel();
+      return entries.length;
+    });
+  }
+
+  /**
+   * Permanently bans a player from joining the queue by granting them a
+   * far-future matchmaking cooldown. If they are currently queued, they are
+   * removed immediately. Returns an error string when the ban cannot be recorded.
+   */
+  async banFromQueue(
+    discordId: string,
+    username: string,
+    reason: string | null,
+    adminId: string | null
+  ): Promise<{ ok: boolean; error?: string }> {
+    return this.mutex.run(async () => {
+      const user = this.ctx.db.repos.users.ensureUser(discordId, username ? username : `Unknown (${discordId})`);
+      // Far-future expiry acts as a permanent ban.
+      const until = new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000).toISOString();
+      const existing = this.ctx.db.repos.cooldowns.active(discordId, new Date().toISOString());
+      if (existing && existing.until >= until) {
+        return { ok: false, error: 'This player is already permanently banned from the queue.' };
+      }
+      this.ctx.db.repos.cooldowns.set(discordId, until, reason ? `Ban: ${reason}` : 'Banned from queue by a moderator', adminId);
+      const wasQueued = this.ctx.db.repos.queue.remove(discordId);
+      if (wasQueued) await this.notifyLeft({ discord_id: discordId, username: user.username, elo_at_join: user.elo, joined_at: new Date().toISOString() }, 'You have been banned from the scrim queue by a moderator.');
+      await this.refreshPanel();
+      return { ok: true };
+    });
+  }
+
+  /**
+   * Removes a permanent ban / cooldown, letting the player queue again.
+   */
+  async unbanFromQueue(discordId: string, adminId: string | null): Promise<{ ok: boolean; error?: string }> {
+    return this.mutex.run(async () => {
+      const removed = this.ctx.db.repos.cooldowns.remove(discordId);
+      if (!removed) {
+        return { ok: false, error: 'No active cooldown or ban was found for this player.' };
+      }
+      await this.refreshPanel();
+      return { ok: true };
+    });
+  }
 }

@@ -8,6 +8,26 @@ export class UserRepository {
     return this.db.prepare('SELECT * FROM users WHERE discord_id = ?').get(discordId) as UserRow | undefined;
   }
 
+  /** Resets every registered player's Elo to the starting value. Returns the count reset. */
+  resetAllElo(resetTo = 1000): number {
+    const users = this.listAll();
+    const tx = this.db.transaction(() => {
+      for (const u of users) {
+        this.db
+          .prepare('UPDATE users SET elo = ?, peak_elo = ? WHERE discord_id = ?')
+          .run(resetTo, resetTo, u.discord_id);
+        this.db
+          .prepare(
+            `INSERT INTO elo_history (discord_id, match_id, previous_elo, elo_change, new_elo)
+             VALUES (?, 'admin-reset', ?, ?, ?)`
+          )
+          .run(u.discord_id, u.elo, resetTo - u.elo, resetTo);
+      }
+    });
+    tx();
+    return users.length;
+  }
+
   /** Returns the user row, creating a default profile if none exists. */
   ensureUser(discordId: string, username: string): UserRow {
     const existing = this.getById(discordId);
@@ -103,6 +123,26 @@ export class UserRepository {
          VALUES (?, ?, ?, ?, ?)`
       )
       .run(discordId, matchId, previousElo, eloChange, newElo);
+  }
+
+  /**
+   * Resets a player's Elo rating to the starting value (default 1000), also
+   * resetting peak Elo so the profile reflects the fresh rating. Other
+   * statistics (wins/losses/matches) are preserved — only the rating resets.
+   */
+  resetElo(discordId: string, resetTo = 1000): boolean {
+    const existing = this.getById(discordId);
+    if (!existing) return false;
+    this.db
+      .prepare('UPDATE users SET elo = ?, peak_elo = ? WHERE discord_id = ?')
+      .run(resetTo, resetTo, discordId);
+    this.db
+      .prepare(
+        `INSERT INTO elo_history (discord_id, match_id, previous_elo, elo_change, new_elo)
+         VALUES (?, 'admin-reset', ?, ?, ?)`
+      )
+      .run(discordId, existing.elo, resetTo - existing.elo, resetTo);
+    return true;
   }
 
   getEloHistory(discordId: string, limit: number, offset: number): EloHistoryEntry[] {

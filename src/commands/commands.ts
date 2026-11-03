@@ -5,6 +5,7 @@ import {
   ButtonStyle,
   ActionRowBuilder,
   MessageFlags,
+  PermissionsBitField,
 } from 'discord.js';
 import { AppContext } from '../context';
 import {
@@ -155,10 +156,23 @@ export class CommandHandler {
 }
 
 export function isStaff(interaction: ChatInputCommandInteraction, staffRoleId: string | undefined): boolean {
+  return hasStaffPermission(interaction.user.id, interaction.memberPermissions, interaction.member, staffRoleId);
+}
+
+/**
+ * Shared staff gate for any interaction (commands, buttons, menus, modals).
+ * Uses the configured staff role when present, otherwise the Administrator
+ * permission. This is the single source of truth for moderator actions.
+ */
+export function hasStaffPermission(
+  _userId: string,
+  memberPermissions: Readonly<PermissionsBitField> | null | undefined,
+  member: unknown,
+  staffRoleId: string | undefined
+): boolean {
   if (!staffRoleId) {
-    return interaction.memberPermissions?.has('Administrator') ?? false;
+    return memberPermissions?.has('Administrator') ?? false;
   }
-  const member = interaction.member;
   if (!member) return false;
   const roles = (member as { roles?: { cache?: { has?: (id: string) => boolean } } }).roles?.cache;
   return roles?.has?.(staffRoleId) ?? false;

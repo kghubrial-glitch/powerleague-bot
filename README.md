@@ -204,9 +204,27 @@ never has its token wiped. Values are resolved in priority order:
 | `/scrim dodge <match_id> <player> <cooldown\|clear> [minutes]` | Moderator decision on a dodge report. |
 | `/scrim stats` | Server-wide statistics. |
 | `/scrim audit [limit]` | Recent audit log entries. |
+| `/scrim clear [reason]` | Clear the matchmaking queue (players are notified). |
+| `/scrim resetelo [player]` | Reset Elo to 1000 for one player, or every player when omitted. |
+| `/scrim ban <player> [reason]` | Ban a player from joining the queue. |
+| `/scrim unban <player>` | Remove a queue ban / cooldown. |
+| `/clear` | Shortcut: reset every player's Elo to 1000 (irreversible). |
 
 All admin commands require the configured `STAFF_ROLE_ID` or
 `Administrator` permission.
+
+### Staff panel buttons
+
+The queue panel includes a third row of staff-only controls (visible to
+everyone, but gated when pressed):
+
+| Button | Action |
+| --- | --- |
+| `🧹 Clear Queue` | Removes every player from the queue and notifies them. |
+| `🔨 Ban from Queue` | Opens a modal to permanently ban a player (by Discord ID) from queueing. |
+| `⚖️ Reset all Elo` | Resets every player to 1000 Elo after a confirmation prompt. |
+
+All staff panel actions are written to the audit log.
 
 ---
 

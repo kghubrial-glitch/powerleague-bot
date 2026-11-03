@@ -15,6 +15,7 @@ import {
 import { AppContext } from '../context';
 import { MatchRow } from '../types';
 import { leaderboardEmbed, profileEmbed } from '../format';
+import { hasStaffPermission } from '../commands/commands';
 
 const CUSTOM_ID_SEPARATOR = ':';
 const MAX_CODE_LENGTH = 12;
@@ -48,6 +49,26 @@ export class InteractionHandler {
       }
       if (customId === 'queue:leaderboard') {
         await this.handleQueueLeaderboard(interaction);
+        return;
+      }
+      if (customId === 'staff:queue:clear') {
+        await this.handleStaffClearQueue(interaction);
+        return;
+      }
+      if (customId === 'staff:queue:ban') {
+        await this.handleStaffBanModal(interaction);
+        return;
+      }
+      if (customId === 'staff:resetelo:all') {
+        await this.handleStaffResetAllElo(interaction);
+        return;
+      }
+      if (customId === 'staff:resetelo:confirm') {
+        await this.handleStaffResetAllEloConfirmed(interaction);
+        return;
+      }
+      if (customId === 'staff:resetelo:cancel') {
+        await interaction.update({ content: 'Reset cancelled.', components: [] });
         return;
       }
       if (customId.startsWith('vote:')) {
@@ -137,8 +158,134 @@ export class InteractionHandler {
   }
 
   // -------------------------------------------------------------------------
+  // Staff panel buttons
+  // -------------------------------------------------------------------------
+
+  /** Guards a staff-only button press. Returns true when authorized. */
+  private isStaffButton(interaction: ButtonInteraction): boolean {
+    return hasStaffPermission(interaction.user.id, interaction.memberPermissions, interaction.member, this.ctx.settings.staffRoleId);
+  }
+
+  private async staffDenied(interaction: ButtonInteraction): Promise<void> {
+    await interaction.reply({
+      content: '⛔ You need the staff role (or Administrator) to use this button.',
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  private async handleStaffClearQueue(interaction: ButtonInteraction): Promise<void> {
+    if (!this.isStaffButton(interaction)) return this.staffDenied(interaction);
+    const removed = await this.ctx.queue.clearQueue('The queue was cleared by staff.');
+    await interaction.reply({
+      content: removed > 0
+        ? `🧹 Cleared the queue — **${removed}** player${removed === 1 ? ' was' : 's were'} removed. They were notified.`
+        : '🧹 The queue is already empty.',
+      flags: MessageFlags.Ephemeral,
+    });
+    this.ctx.db.repos.audits.log({
+      action: 'queue_cleared_panel',
+      administrator_id: interaction.user.id,
+      details: JSON.stringify({ removed }),
+    });
+  }
+
+  private async handleStaffBanModal(interaction: ButtonInteraction): Promise<void> {
+    if (!this.isStaffButton(interaction)) return this.staffDenied(interaction);
+    const userIdInput = new TextInputBuilder()
+      .setCustomId('ban_user_id')
+      .setLabel('Discord user ID')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true)
+      .setPlaceholder('Paste the player’s Discord ID (right-click → Copy User ID)')
+      .setMaxLength(30);
+    const reasonInput = new TextInputBuilder()
+      .setCustomId('ban_reason')
+      .setLabel('Reason (shown to the player)')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(false)
+      .setMaxLength(200);
+    const modal = new ModalBuilder()
+      .setCustomId('modal:queueban')
+      .setTitle('🔨 Ban from Queue')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(userIdInput),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(reasonInput)
+      );
+    await interaction.showModal(modal);
+  }
+
+  private async handleStaffResetAllElo(interaction: ButtonInteraction): Promise<void> {
+    if (!this.isStaffButton(interaction)) return this.staffDenied(interaction);
+    // Confirm before destroying everyone's ratings.
+    const confirm = new ButtonBuilder()
+      .setCustomId('staff:resetelo:confirm')
+      .setLabel('Yes, reset all Elo')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('✔️');
+    const cancel = new ButtonBuilder()
+      .setCustomId('staff:resetelo:cancel')
+      .setLabel('Cancel')
+      .setStyle(ButtonStyle.Secondary)
+      .setEmoji('🚪');
+    await interaction.reply({
+      content: '⚠️ **This resets every player to 1000 Elo.** This cannot be undone. Proceed?',
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(confirm, cancel),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  private async handleStaffResetAllEloConfirmed(interaction: ButtonInteraction): Promise<void> {
+    if (!this.isStaffButton(interaction)) return this.staffDenied(interaction);
+    const reset = this.ctx.db.repos.users.resetAllElo();
+    await interaction.update({
+      content: `⚖️ Reset **all ${reset}** player${reset === 1 ? '' : 's'} to **1000 Elo** (peak reset too).`,
+      components: [],
+    });
+    this.ctx.db.repos.audits.log({
+      action: 'elo_reset_all_panel',
+      administrator_id: interaction.user.id,
+      details: JSON.stringify({ count: reset }),
+    });
+    await this.ctx.queue.refreshPanel().catch(() => {});
+  }
+
+  // -------------------------------------------------------------------------
   // Voting buttons
   // -------------------------------------------------------------------------
+
+  private async handleStaffBanSubmit(interaction: ModalSubmitInteraction): Promise<void> {
+    const userId = (interaction.fields.getTextInputValue('ban_user_id') ?? '').trim();
+    const reason = (interaction.fields.getTextInputValue('ban_reason') ?? '').trim() || null;
+    const adminId = interaction.user.id;
+
+    if (!/^\d{15,20}$/.test(userId)) {
+      await interaction.reply({ content: 'That does not look like a valid Discord user ID.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+
+    // Resolve the player's username if we can; otherwise keep the ID.
+    let username = `Unknown (${userId})`;
+    const target = await interaction.client.users.fetch(userId).catch(() => null);
+    if (target) username = target.username;
+
+    const result = await this.ctx.queue.banFromQueue(userId, username, reason, adminId);
+    await interaction.reply({
+      content: result.ok
+        ? `🔨 Banned **${username}** (\`${userId}\`) from the queue.${reason ? ` Reason: ${reason}` : ''}\nRemove with \`/scrim unban\`.`
+        : result.error ?? 'Could not ban the player.',
+      flags: MessageFlags.Ephemeral,
+    });
+    if (result.ok) {
+      this.ctx.db.repos.audits.log({
+        action: 'queue_ban_panel',
+        administrator_id: adminId,
+        target_id: userId,
+        details: JSON.stringify({ reason }),
+      });
+    }
+  }
 
   private async handleVote(interaction: ButtonInteraction, customId: string): Promise<void> {
     // Format: vote:<choice>[:<matchId>]
@@ -465,6 +612,10 @@ export class InteractionHandler {
         const result = await this.ctx.matches.submitTeamCode(matchId, code, interaction.user.id);
         await interaction.reply({ content: result.ok ? 'TeamCode submitted ✅' : result.error ?? 'Could not submit.', flags: MessageFlags.Ephemeral });
         await this.ctx.matches.refreshMatchMessage(matchId).catch(() => {});
+        return;
+      }
+      if (customId === 'modal:queueban') {
+        await this.handleStaffBanSubmit(interaction);
         return;
       }
       if (customId.startsWith('modal:cancel:')) {

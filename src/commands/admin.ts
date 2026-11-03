@@ -145,14 +145,61 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
       .setDescription('Show the recent audit log.')
       .addIntegerOption((o) => o.setName('limit').setDescription('Number of entries.').setRequired(false))
   );
+  scrim.addSubcommand((s) =>
+    s
+      .setName('clear')
+      .setDescription('Clear the matchmaking queue (staff).')
+      .addStringOption((o) => o.setName('reason').setDescription('Reason shown to removed players.').setRequired(false))
+  );
+  scrim.addSubcommand((s) =>
+    s
+      .setName('resetelo')
+      .setDescription('Reset Elo for every player (or a single player) to 1000.')
+      .addUserOption((o) => o.setName('player').setDescription('A specific player to reset (defaults to everyone).').setRequired(false))
+  );
+  scrim.addSubcommand((s) =>
+    s
+      .setName('ban')
+      .setDescription('Ban a player from joining the queue.')
+      .addUserOption((o) => o.setName('player').setDescription('Player to ban.').setRequired(true))
+      .addStringOption((o) => o.setName('reason').setDescription('Ban reason.').setRequired(false))
+  );
+  scrim.addSubcommand((s) =>
+    s
+      .setName('unban')
+      .setDescription('Remove a queue ban / cooldown from a player.')
+      .addUserOption((o) => o.setName('player').setDescription('Player to unban.').setRequired(true))
+  );
 
-  return [scrim.toJSON()];
+  // Top-level staff shortcut: wipe every player's Elo back to 1000.
+  const clear = new SlashCommandBuilder()
+    .setName('clear')
+    .setDescription('Reset every player’s Elo to 1000 (staff, irreversible).');
+
+  return [scrim.toJSON(), clear.toJSON()];
 }
 
 const STAFF_ONLY = "You don't have permission to use this command (staff role or Administrator required).";
 
 export class AdminCommandHandler {
   constructor(private ctx: AppContext) {}
+
+  /**
+   * Handles top-level admin commands (e.g. `/clear`) that live outside the
+   * `/scrim` group. The event router sends these here.
+   */
+  async handleTopLevel(command: string, interaction: ChatInputCommandInteraction): Promise<void> {
+    if (!isStaff(interaction, this.ctx.settings.staffRoleId)) {
+      await interaction.reply({ content: STAFF_ONLY, flags: MessageFlags.Ephemeral });
+      return;
+    }
+    switch (command) {
+      case 'clear':
+        return this.resetElo(interaction);
+      default:
+        await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
+    }
+  }
 
   async handle(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!isStaff(interaction, this.ctx.settings.staffRoleId)) {
@@ -188,6 +235,14 @@ export class AdminCommandHandler {
         return this.dodge(interaction);
       case 'audit':
         return this.audit(interaction);
+      case 'clear':
+        return this.clearQueue(interaction);
+      case 'resetelo':
+        return this.resetElo(interaction);
+      case 'ban':
+        return this.ban(interaction);
+      case 'unban':
+        return this.unban(interaction);
       default:
         await interaction.reply({ content: 'Unknown subcommand.', flags: MessageFlags.Ephemeral });
     }
@@ -421,5 +476,91 @@ export class AdminCommandHandler {
       .setColor(0x9b59b6)
       .setDescription(lines.join('\n') || 'No entries.');
     await interaction.reply({ embeds: [embed] });
+  }
+
+  private async clearQueue(interaction: ChatInputCommandInteraction): Promise<void> {
+    const reason = interaction.options.getString('reason') ?? 'The queue was cleared by a moderator.';
+    const removed = await this.ctx.queue.clearQueue(reason);
+    await interaction.reply({
+      content: removed > 0
+        ? `🧹 Cleared the queue — **${removed}** player${removed === 1 ? ' was' : 's were'} removed. They were notified.`
+        : '🧹 The queue is already empty.',
+      flags: MessageFlags.Ephemeral,
+    });
+    this.ctx.db.repos.audits.log({
+      action: 'queue_cleared',
+      administrator_id: interaction.user.id,
+      details: JSON.stringify({ removed, reason }),
+    });
+  }
+
+  private async resetElo(interaction: ChatInputCommandInteraction): Promise<void> {
+    const target = interaction.options.getUser('player');
+    if (target) {
+      const user = this.ctx.db.repos.users.ensureUser(target.id, target.username);
+      const wasElo = user.elo;
+      if (!this.ctx.db.repos.users.resetElo(target.id)) {
+        await interaction.reply({ content: `No profile found for **${target.username}**.`, flags: MessageFlags.Ephemeral });
+        return;
+      }
+      await interaction.reply({
+        content: `⚖️ Reset **${target.username}** Elo: **${wasElo} → 1000** (peak reset too).`,
+        flags: MessageFlags.Ephemeral,
+      });
+      this.ctx.db.repos.audits.log({
+        action: 'elo_reset_single',
+        administrator_id: interaction.user.id,
+        target_id: user.discord_id,
+        details: JSON.stringify({ previous: wasElo }),
+      });
+    } else {
+      const reset = this.ctx.db.repos.users.resetAllElo();
+      await interaction.reply({
+        content: `⚖️ Reset **all ${reset}** player${reset === 1 ? '' : 's'} to **1000 Elo** (peak reset too).`,
+        flags: MessageFlags.Ephemeral,
+      });
+      this.ctx.db.repos.audits.log({
+        action: 'elo_reset_all',
+        administrator_id: interaction.user.id,
+        details: JSON.stringify({ count: reset }),
+      });
+    }
+    await this.ctx.queue.refreshPanel().catch(() => {});
+  }
+
+  private async ban(interaction: ChatInputCommandInteraction): Promise<void> {
+    const target = interaction.options.getUser('player', true);
+    const reason = interaction.options.getString('reason') ?? null;
+    const result = await this.ctx.queue.banFromQueue(target.id, target.username, reason, interaction.user.id);
+    if (!result.ok) {
+      await interaction.reply({ content: result.error ?? 'Could not ban the player.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    await interaction.reply({
+      content: `🔨 Banned **${target.username}** from the queue.${reason ? ` Reason: ${reason}` : ''}\nRemove with \`/scrim unban\`.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    this.ctx.db.repos.audits.log({
+      action: 'queue_ban',
+      administrator_id: interaction.user.id,
+      target_id: target.id,
+      details: JSON.stringify({ reason }),
+    });
+  }
+
+  private async unban(interaction: ChatInputCommandInteraction): Promise<void> {
+    const target = interaction.options.getUser('player', true);
+    const result = await this.ctx.queue.unbanFromQueue(target.id, interaction.user.id);
+    await interaction.reply({
+      content: result.ok ? `✅ **${target.username}** can now join the queue again.` : result.error ?? 'Could not unban.',
+      flags: MessageFlags.Ephemeral,
+    });
+    if (result.ok) {
+      this.ctx.db.repos.audits.log({
+        action: 'queue_unban',
+        administrator_id: interaction.user.id,
+        target_id: target.id,
+      });
+    }
   }
 }

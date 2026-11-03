@@ -124,7 +124,7 @@ export function queueEmbed(
   }
   embed.addFields({ name: 'SETTINGS', value: body.join('\n') });
 
-  embed.setFooter({ text: `${BRAND_FOOTER} · six ready players start a scrim` });
+  embed.setFooter({ text: `${BRAND_FOOTER} · six ready players start a scrim · staff controls below` });
   return embed;
 }
 
@@ -166,9 +166,27 @@ export function queueActionRows(): ActionRowBuilder<ButtonBuilder>[] {
     .setStyle(ButtonStyle.Primary)
     .setEmoji('🏆');
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(join, leave, refresh);
-  const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(profile, leaderboard);
-  return [row, row2];
+  const clear = new ButtonBuilder()
+    .setCustomId('staff:queue:clear')
+    .setLabel('Clear Queue')
+    .setStyle(ButtonStyle.Secondary)
+    .setEmoji('🧹');
+  const ban = new ButtonBuilder()
+    .setCustomId('staff:queue:ban')
+    .setLabel('Ban from Queue')
+    .setStyle(ButtonStyle.Danger)
+    .setEmoji('🔨');
+  const resetElo = new ButtonBuilder()
+    .setCustomId('staff:resetelo:all')
+    .setLabel('Reset all Elo')
+    .setStyle(ButtonStyle.Danger)
+    .setEmoji('⚖️');
+
+  const playerRow = new ActionRowBuilder<ButtonBuilder>().addComponents(join, leave, refresh);
+  const infoRow = new ActionRowBuilder<ButtonBuilder>().addComponents(profile, leaderboard);
+  // Third row is staff-only: the handlers re-check permissions on every click.
+  const staffRow = new ActionRowBuilder<ButtonBuilder>().addComponents(clear, ban, resetElo);
+  return [playerRow, infoRow, staffRow];
 }
 
 // ---------------------------------------------------------------------------
