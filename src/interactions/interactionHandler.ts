@@ -10,6 +10,7 @@ import {
   ModalSubmitInteraction,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags,
 } from 'discord.js';
 import { AppContext } from '../context';
 import { MatchRow } from '../types';
@@ -78,7 +79,7 @@ export class InteractionHandler {
         return;
       }
       // Cancellation confirm modal handled in handleModal.
-      await interaction.reply({ content: 'Unknown interaction.', ephemeral: true });
+      await interaction.reply({ content: 'Unknown interaction.', flags: MessageFlags.Ephemeral });
     } catch (error) {
       await this.safeError(interaction, error);
     }
@@ -94,7 +95,7 @@ export class InteractionHandler {
       content: result.ok
         ? `You joined the queue. Current size: ${this.ctx.db.repos.queue.count()}. When all six players are in, a match is created automatically.`
         : result.error ?? 'Could not join the queue.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     await this.ctx.queue.refreshPanel().catch(() => {});
   }
@@ -103,7 +104,7 @@ export class InteractionHandler {
     const result = await this.ctx.queue.leave(interaction.user.id);
     await interaction.reply({
       content: result.ok ? 'You left the queue.' : result.error ?? 'Could not leave the queue.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     await this.ctx.queue.refreshPanel().catch(() => {});
   }
@@ -118,19 +119,19 @@ export class InteractionHandler {
     const choice = parts[1] as 'A' | 'B' | 'draw';
     const matchId = parts[2] ?? this.currentMatchFor(interaction.user.id, interaction.channelId);
     if (!matchId) {
-      await interaction.reply({ content: 'Could not determine the match for this vote.', ephemeral: true });
+      await interaction.reply({ content: 'Could not determine the match for this vote.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (choice !== 'A' && choice !== 'B' && choice !== 'draw') {
-      await interaction.reply({ content: 'Invalid vote choice.', ephemeral: true });
+      await interaction.reply({ content: 'Invalid vote choice.', flags: MessageFlags.Ephemeral });
       return;
     }
     await interaction.deferUpdate().catch(() => {});
     const result = await this.ctx.matches.castVote(matchId, interaction.user.id, choice);
     if (!result.ok) {
-      await interaction.followUp({ content: result.error, ephemeral: true }).catch(() => {});
+      await interaction.followUp({ content: result.error, flags: MessageFlags.Ephemeral }).catch(() => {});
     } else {
-      await interaction.followUp({ content: 'Your vote has been recorded (private until voting ends).', ephemeral: true }).catch(() => {});
+      await interaction.followUp({ content: 'Your vote has been recorded (private until voting ends).', flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   }
 
@@ -141,11 +142,11 @@ export class InteractionHandler {
   private async openTeamCodeModal(interaction: ButtonInteraction): Promise<void> {
     const match = this.currentMatchFor(interaction.user.id, interaction.channelId);
     if (!match) {
-      await interaction.reply({ content: 'Could not determine the match.', ephemeral: true });
+      await interaction.reply({ content: 'Could not determine the match.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (match.status !== 'awaiting_teamcode') {
-      await interaction.reply({ content: 'The TeamCode window for this match is closed.', ephemeral: true });
+      await interaction.reply({ content: 'The TeamCode window for this match is closed.', flags: MessageFlags.Ephemeral });
       return;
     }
     const input = new TextInputBuilder()
@@ -165,18 +166,18 @@ export class InteractionHandler {
   private async handleReady(interaction: ButtonInteraction): Promise<void> {
     const match = this.currentMatchFor(interaction.user.id, interaction.channelId);
     if (!match) {
-      await interaction.reply({ content: 'Could not determine the match.', ephemeral: true });
+      await interaction.reply({ content: 'Could not determine the match.', flags: MessageFlags.Ephemeral });
       return;
     }
     const result = await this.ctx.matches.pressReady(match.match_id, interaction.user.id);
-    await interaction.reply({ content: result.ok ? 'You marked yourself ready ✅' : result.error ?? 'Could not set ready.', ephemeral: true });
+    await interaction.reply({ content: result.ok ? 'You marked yourself ready ✅' : result.error ?? 'Could not set ready.', flags: MessageFlags.Ephemeral });
     await this.ctx.matches.refreshMatchMessage(match.match_id).catch(() => {});
   }
 
   private async handleFinished(interaction: ButtonInteraction): Promise<void> {
     const match = this.currentMatchFor(interaction.user.id, interaction.channelId);
     if (!match) {
-      await interaction.reply({ content: 'Could not determine the match.', ephemeral: true });
+      await interaction.reply({ content: 'Could not determine the match.', flags: MessageFlags.Ephemeral });
       return;
     }
     await interaction.deferUpdate().catch(() => {});
@@ -186,11 +187,11 @@ export class InteractionHandler {
   private async handleCancelRequest(interaction: ButtonInteraction): Promise<void> {
     const match = this.currentMatchFor(interaction.user.id, interaction.channelId);
     if (!match) {
-      await interaction.reply({ content: 'Could not determine the match.', ephemeral: true });
+      await interaction.reply({ content: 'Could not determine the match.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (match.status !== 'awaiting_teamcode' && match.status !== 'awaiting_ready' && match.status !== 'in_progress') {
-      await interaction.reply({ content: 'This match cannot be cancelled anymore.', ephemeral: true });
+      await interaction.reply({ content: 'This match cannot be cancelled anymore.', flags: MessageFlags.Ephemeral });
       return;
     }
     const text = new TextInputBuilder()
@@ -210,10 +211,10 @@ export class InteractionHandler {
   private async handleCopyCode(interaction: ButtonInteraction): Promise<void> {
     const match = this.currentMatchFor(interaction.user.id, interaction.channelId);
     if (!match?.team_code) {
-      await interaction.reply({ content: 'No TeamCode is available for this match.', ephemeral: true });
+      await interaction.reply({ content: 'No TeamCode is available for this match.', flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.reply({ content: `TeamCode: \`${match.team_code}\``, ephemeral: true });
+    await interaction.reply({ content: `TeamCode: \`${match.team_code}\``, flags: MessageFlags.Ephemeral });
   }
 
   // -------------------------------------------------------------------------
@@ -229,7 +230,7 @@ export class InteractionHandler {
     const pageSize = 10;
     const pages = Math.max(1, Math.ceil(total / pageSize));
     if (nextPage >= pages) {
-      await interaction.reply({ content: 'You are on the last page.', ephemeral: true });
+      await interaction.reply({ content: 'You are on the last page.', flags: MessageFlags.Ephemeral });
       return;
     }
     const rows = this.ctx.db.repos.users.leaderboard(pageSize, nextPage * pageSize, minMatches);
@@ -253,17 +254,17 @@ export class InteractionHandler {
   private async openFaultCategoryMenu(interaction: ButtonInteraction): Promise<void> {
     const match = this.currentMatchFor(interaction.user.id, interaction.channelId);
     if (!match) {
-      await interaction.reply({ content: 'Could not determine the match.', ephemeral: true });
+      await interaction.reply({ content: 'Could not determine the match.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (match.status !== 'cancelled' && match.status !== 'timed_out') {
-      await interaction.reply({ content: 'Fault reporting is only available for cancelled/timed-out matches.', ephemeral: true });
+      await interaction.reply({ content: 'Fault reporting is only available for cancelled/timed-out matches.', flags: MessageFlags.Ephemeral });
       return;
     }
     const reasons = this.ctx.matches.faultReasons();
     const last = this.ctx.db.repos.faults.forMatch(match.match_id).filter((r) => r.reporter_id === interaction.user.id);
     if (last.some((r) => r.reported_player_id)) {
-      await interaction.reply({ content: 'You have already submitted a player report for this match.', ephemeral: true });
+      await interaction.reply({ content: 'You have already submitted a player report for this match.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -277,7 +278,7 @@ export class InteractionHandler {
       .setPlaceholder('What happened to the match?')
       .addOptions(options);
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
-    await interaction.reply({ content: 'What happened to the match?', components: [row], ephemeral: true });
+    await interaction.reply({ content: 'What happened to the match?', components: [row], flags: MessageFlags.Ephemeral });
   }
 
   // -------------------------------------------------------------------------
@@ -301,7 +302,7 @@ export class InteractionHandler {
         await this.recordFaultSubmission(interaction, matchId, reportedId, reason);
         return;
       }
-      await interaction.reply({ content: 'Unknown menu.', ephemeral: true });
+      await interaction.reply({ content: 'Unknown menu.', flags: MessageFlags.Ephemeral });
     } catch (error) {
       await this.safeError(interaction, error);
     }
@@ -387,7 +388,7 @@ export class InteractionHandler {
     const result = await this.ctx.matches.submitFault(matchId, interaction.user.id, reportedId, reason?.label ?? 'Other');
     await interaction.reply({
       content: result.ok ? 'Your report has been recorded.' : result.error ?? 'Could not record the report.',
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -402,15 +403,15 @@ export class InteractionHandler {
         const matchId = customId.split(CUSTOM_ID_SEPARATOR)[2];
         const code = (interaction.fields.getTextInputValue('teamcode_input') ?? '').trim();
         if (!code) {
-          await interaction.reply({ content: 'The TeamCode cannot be empty.', ephemeral: true });
+          await interaction.reply({ content: 'The TeamCode cannot be empty.', flags: MessageFlags.Ephemeral });
           return;
         }
         if (code.length > MAX_CODE_LENGTH) {
-          await interaction.reply({ content: `TeamCode is too long (max ${MAX_CODE_LENGTH} characters).`, ephemeral: true });
+          await interaction.reply({ content: `TeamCode is too long (max ${MAX_CODE_LENGTH} characters).`, flags: MessageFlags.Ephemeral });
           return;
         }
         const result = await this.ctx.matches.submitTeamCode(matchId, code, interaction.user.id);
-        await interaction.reply({ content: result.ok ? 'TeamCode submitted ✅' : result.error ?? 'Could not submit.', ephemeral: true });
+        await interaction.reply({ content: result.ok ? 'TeamCode submitted ✅' : result.error ?? 'Could not submit.', flags: MessageFlags.Ephemeral });
         await this.ctx.matches.refreshMatchMessage(matchId).catch(() => {});
         return;
       }
@@ -420,10 +421,10 @@ export class InteractionHandler {
         await interaction.deferUpdate().catch(() => {});
         await this.ctx.matches.cancelMatch(matchId, reason, 'cancelled', interaction.user.id);
         await this.ctx.matches.refreshMatchMessage(matchId).catch(() => {});
-        await interaction.followUp({ content: 'Match cancelled.', ephemeral: true }).catch(() => {});
+        await interaction.followUp({ content: 'Match cancelled.', flags: MessageFlags.Ephemeral }).catch(() => {});
         return;
       }
-      await interaction.reply({ content: 'Unknown modal.', ephemeral: true });
+      await interaction.reply({ content: 'Unknown modal.', flags: MessageFlags.Ephemeral });
     } catch (error) {
       await this.safeError(interaction, error);
     }
@@ -446,9 +447,9 @@ export class InteractionHandler {
     const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
     try {
       if (interaction.deferred || interaction.replied) {
-        await interaction.followUp({ content: `⚠️ ${message}`, ephemeral: true }).catch(() => {});
+        await interaction.followUp({ content: `⚠️ ${message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       } else {
-        await interaction.reply({ content: `⚠️ ${message}`, ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: `⚠️ ${message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     } catch {
       // Channel may be gone or interaction expired — nothing actionable.

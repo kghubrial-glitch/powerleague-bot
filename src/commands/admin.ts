@@ -6,10 +6,11 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
+  MessageFlags,
 } from 'discord.js';
 import { AppContext } from '../context';
 import { rankForElo } from '../elo/rankManager';
-import { queueEmbed, queueActionRows, mapsEmbed } from '../format';
+import { queueEmbed, queueActionRows } from '../format';
 import { isStaff } from './commands';
 
 export type AnyCommandBuilder = SlashCommandBuilder | ReturnType<SlashCommandBuilder['addSubcommandGroup']> | ReturnType<SlashCommandBuilder['addSubcommand']>;
@@ -120,7 +121,7 @@ export class AdminCommandHandler {
 
   async handle(interaction: ChatInputCommandInteraction): Promise<void> {
     if (!isStaff(interaction, this.ctx.settings.staffRoleId)) {
-      await interaction.reply({ content: STAFF_ONLY, ephemeral: true });
+      await interaction.reply({ content: STAFF_ONLY, flags: MessageFlags.Ephemeral });
       return;
     }
     const sub = interaction.options.getSubcommand(true);
@@ -149,34 +150,44 @@ export class AdminCommandHandler {
       case 'audit':
         return this.audit(interaction);
       default:
-        await interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
+        await interaction.reply({ content: 'Unknown subcommand.', flags: MessageFlags.Ephemeral });
     }
   }
 
   private async setup(interaction: ChatInputCommandInteraction): Promise<void> {
+    // Channel creation + DB writes can exceed Discord's 3s response window;
+    // acknowledge immediately so the interaction never expires (10062).
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const channel = interaction.channel;
     if (!channel || !(channel instanceof TextChannel)) {
-      await interaction.reply({ content: 'This command must be run in a text channel.', ephemeral: true });
+      await interaction.editReply({ content: 'This command must be run in a text channel.' });
       return;
     }
-    const message = await channel.send({
-      embeds: [queueEmbed(this.ctx.queue.entries(), this.ctx.settings)],
-      components: queueActionRows(),
-    });
-    this.ctx.db.repos.panels.set(channel.id, message.id);
-    await interaction.reply({ content: 'Matchmaking panel created.', ephemeral: true });
-    this.ctx.db.repos.audits.log({
-      action: 'panel_created',
-      administrator_id: interaction.user.id,
-      details: JSON.stringify({ channel_id: channel.id, message_id: message.id }),
-    });
+    try {
+      const message = await channel.send({
+        embeds: [queueEmbed(this.ctx.queue.entries(), this.ctx.settings)],
+        components: queueActionRows(),
+      });
+      this.ctx.db.repos.panels.set(channel.id, message.id);
+      await interaction.editReply({ content: 'Matchmaking panel created.' });
+      this.ctx.db.repos.audits.log({
+        action: 'panel_created',
+        administrator_id: interaction.user.id,
+        details: JSON.stringify({ channel_id: channel.id, message_id: message.id }),
+      });
+    } catch (error) {
+      console.error('setup failed:', error);
+      await interaction
+        .editReply({ content: 'Setup failed. Check the bot logs for details.' })
+        .catch(() => {});
+    }
   }
 
   private async cancel(interaction: ChatInputCommandInteraction): Promise<void> {
     const matchId = interaction.options.getString('match_id', true);
     const reason = interaction.options.getString('reason') ?? 'Cancelled by an administrator';
     const ok = await this.ctx.matches.cancelMatch(matchId, reason, 'cancelled', interaction.user.id);
-    await interaction.reply({ content: ok ? `Match ${matchId} cancelled.` : `Could not cancel ${matchId} (not found or already ended).`, ephemeral: true });
+    await interaction.reply({ content: ok ? `Match ${matchId} cancelled.` : `Could not cancel ${matchId} (not found or already ended).`, flags: MessageFlags.Ephemeral });
   }
 
   private async result(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -186,7 +197,7 @@ export class AdminCommandHandler {
     const scoreA = interaction.options.getInteger('score_a') ?? undefined;
     const scoreB = interaction.options.getInteger('score_b') ?? undefined;
     const result = await this.ctx.matches.adminResolve(matchId, winner, interaction.user.id, scoreA, scoreB);
-    await interaction.reply({ content: result.ok ? `Match ${matchId} resolved with winner ${winner.toUpperCase()}.` : result.error, ephemeral: true });
+    await interaction.reply({ content: result.ok ? `Match ${matchId} resolved with winner ${winner.toUpperCase()}.` : result.error, flags: MessageFlags.Ephemeral });
   }
 
   private async eloAdjust(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -198,7 +209,7 @@ export class AdminCommandHandler {
     const updated = this.ctx.db.repos.users.getById(user.discord_id)!;
     await interaction.reply({
       content: `Adjusted ${target.username}: ${amount >= 0 ? '+' : ''}${amount} Elo. New Elo: ${updated.elo} (peak ${updated.peak_elo}).`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     this.ctx.db.repos.audits.log({
       action: 'admim_elo_adjust',
@@ -213,17 +224,17 @@ export class AdminCommandHandler {
     if (action === 'add') {
       const name = interaction.options.getString('name', true);
       const row = this.ctx.db.repos.maps.add(name);
-      await interaction.reply({ content: `Map added: **${row.name}**.`, ephemeral: true });
+      await interaction.reply({ content: `Map added: **${row.name}**.`, flags: MessageFlags.Ephemeral });
     } else if (action === 'remove') {
       const name = interaction.options.getString('name', true);
       const ok = this.ctx.db.repos.maps.remove(name);
-      await interaction.reply({ content: ok ? `Map removed: **${name}**.` : `Map **${name}** not found.`, ephemeral: true });
+      await interaction.reply({ content: ok ? `Map removed: **${name}**.` : `Map **${name}** not found.`, flags: MessageFlags.Ephemeral });
     } else if (action === 'toggle') {
       const name = interaction.options.getString('name', true);
       const row = this.ctx.db.repos.maps.toggle(name);
       await interaction.reply({
         content: row ? `Map **${row.name}** is now ${row.enabled === 1 ? 'enabled' : 'disabled'}.` : `Map **${name}** not found.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } else if (action === 'gamemode') {
       const name = interaction.options.getString('name', true);
@@ -231,7 +242,7 @@ export class AdminCommandHandler {
       const ok = this.ctx.db.repos.maps.setGameMode(name, mode);
       await interaction.reply({
         content: ok ? `Game mode for **${name}** set to ${mode ?? '(not configured)'}.` : `Map **${name}** not found.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
     this.ctx.db.repos.audits.log({
@@ -247,7 +258,7 @@ export class AdminCommandHandler {
     const reason = interaction.options.getString('reason') ?? 'Set by an administrator';
     const until = new Date(Date.now() + minutes * 60_000).toISOString();
     this.ctx.db.repos.cooldowns.set(target.id, until, reason, interaction.user.id);
-    await interaction.reply({ content: `${target.username} is on a matchmaking cooldown for ${minutes} minutes.`, ephemeral: true });
+    await interaction.reply({ content: `${target.username} is on a matchmaking cooldown for ${minutes} minutes.`, flags: MessageFlags.Ephemeral });
     this.ctx.db.repos.audits.log({
       action: 'cooldown_applied',
       administrator_id: interaction.user.id,
@@ -289,7 +300,7 @@ export class AdminCommandHandler {
   private async resetCode(interaction: ChatInputCommandInteraction): Promise<void> {
     const matchId = interaction.options.getString('match_id', true);
     const ok = await this.ctx.matches.staffResetTeamCode(matchId, interaction.user.id);
-    await interaction.reply({ content: ok ? `TeamCode for ${matchId} has been reset.` : `Match ${matchId} not found.`, ephemeral: true });
+    await interaction.reply({ content: ok ? `TeamCode for ${matchId} has been reset.` : `Match ${matchId} not found.`, flags: MessageFlags.Ephemeral });
   }
 
   private async dodge(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -302,7 +313,7 @@ export class AdminCommandHandler {
       content: decision === 'cooldown'
         ? `Dodge confirmed for ${target.username}: ${minutes}-minute matchmaking cooldown applied.`
         : `Dodge report for ${target.username} cleared (no action).`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 

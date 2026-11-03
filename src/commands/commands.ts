@@ -4,6 +4,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ActionRowBuilder,
+  MessageFlags,
 } from 'discord.js';
 import { AppContext } from '../context';
 import {
@@ -73,7 +74,7 @@ export class CommandHandler {
       case 'leave':
         return this.leaveQueue(interaction);
       default:
-        await interaction.reply({ content: 'Unknown command.', ephemeral: true });
+        await interaction.reply({ content: 'Unknown command.', flags: MessageFlags.Ephemeral });
     }
   }
 
@@ -134,19 +135,19 @@ export class CommandHandler {
   private async matchInfo(interaction: ChatInputCommandInteraction): Promise<void> {
     const active = this.ctx.db.repos.matches.getActiveByPlayer(interaction.user.id);
     if (!active) {
-      await interaction.reply({ content: 'You are not in an active match.', ephemeral: true });
+      await interaction.reply({ content: 'You are not in an active match.', flags: MessageFlags.Ephemeral });
       return;
     }
     if (active.channel_id) {
-      await interaction.reply({ content: `Your current match: <#${active.channel_id}>`, ephemeral: true });
+      await interaction.reply({ content: `Your current match: <#${active.channel_id}>`, flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.reply({ content: `You are in match ${active.match_id}.`, ephemeral: true });
+    await interaction.reply({ content: `You are in match ${active.match_id}.`, flags: MessageFlags.Ephemeral });
   }
 
   private async leaveQueue(interaction: ChatInputCommandInteraction): Promise<void> {
     const result = await this.ctx.queue.leave(interaction.user.id);
-    await interaction.reply({ content: result.ok ? 'You left the queue.' : result.error ?? 'Could not leave.', ephemeral: true });
+    await interaction.reply({ content: result.ok ? 'You left the queue.' : result.error ?? 'Could not leave.', flags: MessageFlags.Ephemeral });
     await this.ctx.queue.refreshPanel().catch(() => {});
   }
 }
