@@ -15,8 +15,9 @@ import { MatchRow, QueueEntryRow, VoteChoice } from '../types';
 import { generateBalancedTeams } from '../matchmaking/teamBalancer';
 import { selectMap } from '../matchmaking/mapSelector';
 import { computeTeamEloChanges } from '../elo/eloCalculator';
-import { rankForElo } from '../elo/rankManager';
+import { rankForElo, rankKey, displayRank } from '../elo/rankManager';
 import { buildMatchEmbed, matchActionRows, winnerLabel } from '../format';
+import { EMBED_COLORS } from '../presentation/embeds';
 import { evaluateVotes, VoteRecord } from './resultVoting';
 import {
   draftPool,
@@ -634,16 +635,17 @@ export class MatchManager {
 
       const { scoreA, scoreB } = seriesScore(match, winner);
 
+      const rankChanges: Array<{ tag: string; before: string; after: string; elo: number }> = [];
       this.ctx.db.repos.transaction(() => {
         const now = new Date().toISOString();
-        this.applyEloToTeam(teamA, matchId, outcomeA, changes.teamAChange, now);
+        this.applyEloToTeam(teamA, matchId, outcomeA, changes.teamAChange, now, rankChanges);
         const outcomeB: 'win' | 'loss' | 'draw' = outcomeA === 'win' ? 'loss' : outcomeA === 'loss' ? 'win' : 'draw';
-        this.applyEloToTeam(teamB, matchId, outcomeB, changes.teamBChange, now);
+        this.applyEloToTeam(teamB, matchId, outcomeB, changes.teamBChange, now, rankChanges);
         this.ctx.db.repos.matches.confirmResult(matchId, winner, scoreA, scoreB);
       });
 
       this.ctx.timers.cancelAllForMatch(matchId);
-      await this.announceResult(matchId, winner);
+      await this.announceResult(matchId, winner, rankChanges);
       await this.refreshMatchMessage(matchId);
       await this.ctx.queue.refreshPanel().catch(() => {});
     } finally {
@@ -664,27 +666,40 @@ export class MatchManager {
     matchId: string,
     outcome: 'win' | 'loss' | 'draw',
     change: number,
-    timestamp: string
+    timestamp: string,
+    rankChanges?: Array<{ tag: string; before: string; after: string; elo: number }>
   ): void {
     for (const id of ids) {
       const user = this.ctx.db.repos.users.getById(id);
       if (!user) continue;
+      const beforeKey = rankKey(user.elo, this.ctx.settings.ranks);
       this.ctx.db.repos.users.applyEloChange(id, matchId, user.elo, change, outcome, timestamp);
+      const after = this.ctx.db.repos.users.getById(id);
+      const afterKey = after ? rankKey(after.elo, this.ctx.settings.ranks) : beforeKey;
+      if (beforeKey !== afterKey && after) {
+        rankChanges?.push({ tag: `<@${id}>`, before: displayRank(user.elo, this.ctx.settings.ranks), after: displayRank(after.elo, this.ctx.settings.ranks), elo: after.elo });
+      }
     }
   }
 
-  private async announceResult(matchId: string, winner: VoteChoice): Promise<void> {
+  private async announceResult(
+    matchId: string,
+    winner: VoteChoice,
+    rankChanges: Array<{ tag: string; before: string; after: string; elo: number }> = []
+  ): Promise<void> {
     const match = this.ctx.db.repos.matches.get(matchId);
     if (!match?.channel_id) return;
     const channel = this.ctx.client.channels.cache.get(match.channel_id);
     if (!channel || !(channel instanceof TextChannel)) return;
+    const changedLines = rankChanges.map((c) => `${c.tag}: ${c.before} ${c.after.startsWith(c.before) ? 'remains' : '->'} ${c.after}`);
     const embed = new EmbedBuilder()
       .setTitle(`RESULT CONFIRMED — #${matchId.replace('scrim-', '')}`)
-      .setColor(0x57f287)
+      .setColor(EMBED_COLORS.success)
       .setDescription(
         `Winner: **${winnerLabel(winner)}**\n\n` +
           `Final score:\n**TEAM A: ${match.team_a_score}**\n**TEAM B: ${match.team_b_score}**\n\n` +
-          'Elo has been updated for all participating players.'
+          'Elo has been updated for all participating players.' +
+          (changedLines.length ? `\n\n**Rank changes**\n${changedLines.join('\n')}` : '')
       );
     await channel.send({ embeds: [embed] });
   }
@@ -972,7 +987,7 @@ export class MatchManager {
       ready,
       votesCount: votes.length,
       voteTotals: tallies,
-      rankFn: (elo) => rankForElo(elo, this.ctx.settings.ranks),
+      ranks: this.ctx.settings.ranks,
       maps: [],
     });
   }

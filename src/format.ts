@@ -1,7 +1,7 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { Settings, RankTier } from './config/settings';
 import { QueueEntryRow, MatchRow, UserRow, MapRow } from './types';
-import { rankForElo } from './elo/rankManager';
+import { rankForElo, displayRank, divisionForElo, divisionName } from './elo/rankManager';
 import { MatchRepository } from './database/repositories/matchRepository';
 import { EMBED_COLORS, relativeTimestamp, shortTimestamp, bullet } from './presentation/embeds';
 
@@ -110,7 +110,7 @@ export interface MatchView {
   ready: string[];
   votesCount: number;
   voteTotals: Record<string, number>;
-  rankFn: (elo: number) => RankTier;
+  ranks: RankTier[];
   maps: MapRow[];
 }
 
@@ -168,10 +168,11 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
     .setColor(matchColor(match))
     .setDescription(matchStatusLine(match));
 
+  const ranks = view.ranks;
   const teamLines = (players: MatchPlayerInfo[]) =>
     players
       .map((p) => {
-        const rank = view.rankFn(p.elo).name;
+        const rank = displayRank(p.elo, ranks);
         return `<@${p.id}> — ${p.elo} Elo (${rank})`;
       })
       .join('\n');
@@ -299,17 +300,23 @@ export function matchActionRows(actions: MatchActions): ActionRowBuilder<ButtonB
 export function profileEmbed(user: UserRow, settings: Settings): EmbedBuilder {
   const ranks = settings.ranks;
   const rank = rankForElo(user.elo, ranks);
+  const division = divisionForElo(user.elo, ranks);
   const winRate = user.total_matches > 0 ? ((user.wins / user.total_matches) * 100).toFixed(1) : '0.0';
   const streakLabel =
     user.current_streak === 0 ? '—' : `${user.current_streak} ${user.current_streak > 0 ? 'Win' : 'Loss'}${Math.abs(user.current_streak) === 1 ? '' : 'es'}`;
   const progress = rankProgress(user.elo, rank, ranks);
+  const isTopRank = ranks.findIndex((r) => r.name === rank.name) === ranks.length - 1;
 
   const embed = new EmbedBuilder()
     .setTitle('PLAYER PROFILE')
     .setDescription(`Player: <@${user.discord_id}>`)
     .setColor(EMBED_COLORS.competitive)
     .addFields(
-      { name: 'COMPETITIVE RATING', value: `${user.elo} ELO\nRANK: **${rank.name.toUpperCase()}**`, inline: false },
+      {
+        name: 'COMPETITIVE RATING',
+        value: `${user.elo} ELO\nRANK: **${displayRank(user.elo, ranks)}**${isTopRank ? '' : ` (Division ${divisionName(division)})`}`,
+        inline: false,
+      },
       { name: 'Next Rank Progress', value: `${progress}%`, inline: true },
       { name: 'Peak Elo', value: `${user.peak_elo}`, inline: true },
       { name: 'CAREER STATISTICS', value: `Matches: ${user.total_matches}\nWins: ${user.wins}\nLosses: ${user.losses}\nDraws: ${user.draws}\nWin Rate: ${winRate}%`, inline: false },
@@ -337,8 +344,7 @@ export function leaderboardEmbed(
     .setColor(EMBED_COLORS.competitive)
     .setDescription(`Sorted by current Elo | Page ${page + 1}/${pages}`);
   const lines = rows.map((r, i) => {
-    const rankTier = rankForElo(r.elo, settings.ranks);
-    return `#${startIndex + i + 1} **${r.username}** — ${r.elo} Elo (${rankTier.name}) | ${r.wins}W/${r.losses}L`;
+    return `#${startIndex + i + 1} **${r.username}** — ${r.elo} Elo (${displayRank(r.elo, settings.ranks)}) | ${r.wins}W/${r.losses}L`;
   });
   embed.addFields({ name: `Top players (${total})`, value: lines.join('\n') || 'No players yet' });
   return embed;
