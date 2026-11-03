@@ -1,4 +1,5 @@
 import { EmbedBuilder } from 'discord.js';
+import { parseDbTimestamp } from './dbTime';
 
 /**
  * Shared visual identity for every bot message.
@@ -34,16 +35,16 @@ export function bullet(text: string): string {
   return `\u2022 ${text}`;
 }
 
-/** Converts an ISO timestamp into a Discord relative timestamp markdown. */
+/** Converts a DB/ISO timestamp into a Discord relative timestamp markdown. */
 export function relativeTimestamp(iso: string): string {
-  const ms = Date.parse(iso);
+  const ms = parseDbTimestamp(iso);
   if (Number.isNaN(ms)) return iso;
   return `<t:${Math.floor(ms / 1000)}:R>`;
 }
 
-/** Converts an ISO timestamp into a Discord short-date/time markdown. */
+/** Converts a DB/ISO timestamp into a Discord short-date/time markdown. */
 export function shortTimestamp(iso: string): string {
-  const ms = Date.parse(iso);
+  const ms = parseDbTimestamp(iso);
   if (Number.isNaN(ms)) return iso;
   return `<t:${Math.floor(ms / 1000)}:d> <t:${Math.floor(ms / 1000)}:t>`;
 }

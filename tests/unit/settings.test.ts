@@ -28,14 +28,14 @@ function withConfigFile(contents: Record<string, unknown>, fn: () => void): void
 }
 
 describe('settings', () => {
-  it('defaults to single-game Best of 1 matches', () => {
+  it('defaults to Best of 3 series (Power League format)', () => {
     const settings = loadSettings({} as NodeJS.ProcessEnv);
-    expect(settings.matchFormat).toBe('best_of_1');
+    expect(settings.matchFormat).toBe('best_of_3');
   });
 
-  it('allows opting into Best of 3', () => {
-    const settings = loadSettings({ MATCH_FORMAT: 'best_of_3' } as NodeJS.ProcessEnv);
-    expect(settings.matchFormat).toBe('best_of_3');
+  it('allows opting into single-game Best of 1', () => {
+    const settings = loadSettings({ MATCH_FORMAT: 'best_of_1' } as NodeJS.ProcessEnv);
+    expect(settings.matchFormat).toBe('best_of_1');
   });
 
   it('loads credentials and options from config.json', () => {

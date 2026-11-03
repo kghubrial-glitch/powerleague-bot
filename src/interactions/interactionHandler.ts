@@ -99,9 +99,10 @@ export class InteractionHandler {
 
   private async handleJoin(interaction: ButtonInteraction): Promise<void> {
     const result = await this.ctx.queue.join(interaction.user.id, interaction.user.username);
+    const size = this.ctx.db.repos.queue.count();
     await interaction.reply({
       content: result.ok
-        ? `You joined the queue. Current size: ${this.ctx.db.repos.queue.count()}. When all six players are in, a match is created automatically.`
+        ? `✅ You joined the queue. **${size}/${this.ctx.settings.queueSize}** players — a match starts automatically once full.`
         : result.error ?? 'Could not join the queue.',
       flags: MessageFlags.Ephemeral,
     });
@@ -111,7 +112,7 @@ export class InteractionHandler {
   private async handleLeave(interaction: ButtonInteraction): Promise<void> {
     const result = await this.ctx.queue.leave(interaction.user.id);
     await interaction.reply({
-      content: result.ok ? 'You left the queue.' : result.error ?? 'Could not leave the queue.',
+      content: result.ok ? '🚪 You left the queue.' : result.error ?? 'Could not leave the queue.',
       flags: MessageFlags.Ephemeral,
     });
     await this.ctx.queue.refreshPanel().catch(() => {});
@@ -184,7 +185,7 @@ export class InteractionHandler {
     const row = new ActionRowBuilder<TextInputBuilder>().addComponents(input);
     const modal = new ModalBuilder()
       .setCustomId(`modal:teamcode:${match.match_id}`)
-      .setTitle('Submit TeamCode')
+      .setTitle('🔑 Submit TeamCode')
       .addComponents(row);
     await interaction.showModal(modal);
   }
@@ -196,7 +197,7 @@ export class InteractionHandler {
       return;
     }
     const result = await this.ctx.matches.pressReady(match.match_id, interaction.user.id);
-    await interaction.reply({ content: result.ok ? 'You marked yourself ready ✅' : result.error ?? 'Could not set ready.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: result.ok ? '✅ Ready! Waiting for the rest of the lobby…' : result.error ?? 'Could not mark ready.', flags: MessageFlags.Ephemeral });
     await this.ctx.matches.refreshMatchMessage(match.match_id).catch(() => {});
   }
 
@@ -229,7 +230,7 @@ export class InteractionHandler {
     const row = new ActionRowBuilder<TextInputBuilder>().addComponents(text);
     const modal = new ModalBuilder()
       .setCustomId(`modal:cancel:${match.match_id}`)
-      .setTitle('Cancel / report issue')
+      .setTitle('🚫 Cancel / report issue')
       .addComponents(row);
     await interaction.showModal(modal);
   }
@@ -240,7 +241,7 @@ export class InteractionHandler {
       await interaction.reply({ content: 'No TeamCode is available for this match.', flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.reply({ content: `TeamCode: \`${match.team_code}\``, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: `🔑 TeamCode: \`${match.team_code}\``, flags: MessageFlags.Ephemeral });
   }
 
   // -------------------------------------------------------------------------

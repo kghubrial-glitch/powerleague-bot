@@ -1,6 +1,7 @@
-import { TextChannel, Message } from 'discord.js';
+import { TextChannel, Message, DMChannel } from 'discord.js';
 import { AppContext } from '../context';
-import { queueEmbed, queueActionRows } from '../format';
+import { queueEmbed, queueActionRows, prettyMatchId } from '../format';
+import { parseDbTimestamp } from '../presentation/dbTime';
 import { Mutex } from '../services/mutex';
 import { QueueEntryRow } from '../types';
 
@@ -35,7 +36,7 @@ export class QueueManager {
       if (active) {
         return {
           ok: false,
-          error: `You are still in active match ${active.match_id.replace('scrim-', '#')}. You cannot queue while in a match.`,
+          error: `You are still in active match **${prettyMatchId(active.match_id)}**. You cannot queue while in a match.`,
         };
       }
       const user = this.ctx.db.repos.users.ensureUser(discordId, username);
@@ -112,6 +113,47 @@ export class QueueManager {
 
   isInQueue(discordId: string): boolean {
     return this.ctx.db.repos.queue.get(discordId) !== undefined;
+  }
+
+  /**
+   * Removes players who have been in the queue past `queueInactiveAfter`
+   * without a match starting. They are told why via DM (falling back to the
+   * queue channel), and the panel + staff channel are refreshed. This runs on
+   * a periodic sweep (see index.ts) so it also works while nobody clicks.
+   */
+  async sweepStale(): Promise<void> {
+    const seconds = this.ctx.settings.queueInactiveAfter;
+    if (!seconds || seconds <= 0) return;
+    await this.mutex.run(async () => {
+      const cutoff = Date.now() - seconds * 1000;
+      const stale = this.ctx.db.repos.queue.list().filter((e) => parseDbTimestamp(e.joined_at) < cutoff);
+      if (stale.length === 0) return;
+      for (const entry of stale) {
+        this.ctx.db.repos.queue.remove(entry.discord_id);
+        await this.notifyLeft(entry, 'You were removed from the scrim queue: no match started within the wait limit.');
+      }
+      await this.refreshPanel();
+    });
+  }
+
+  /** Notifies a removed player in DMs, falling back to the queue channel. */
+  private async notifyLeft(entry: QueueEntryRow, message: string): Promise<void> {
+    const user = await this.ctx.client.users.fetch(entry.discord_id).catch(() => null);
+    let channel: DMChannel | TextChannel | null = null;
+    if (user) {
+      channel = (await user.createDM().catch(() => null)) ?? null;
+    }
+    if (!channel && this.ctx.settings.queueChannelId) {
+      const ch = this.ctx.client.channels.cache.get(this.ctx.settings.queueChannelId);
+      if (ch instanceof TextChannel) channel = ch;
+    }
+    if (!channel) return;
+    await channel
+      .send({
+        content: `⏳ ${message}\nYou can rejoin anytime with the **Join Queue** button.`,
+        allowedMentions: { parse: [] },
+      })
+      .catch(() => {});
   }
 
   private async triggerMatchmaking(): Promise<void> {

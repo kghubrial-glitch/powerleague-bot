@@ -114,6 +114,8 @@ export interface Settings {
     vote: number;
     faultReport: number;
   };
+  /** Seconds a player may wait idle in the queue before being removed (0 = disabled). */
+  queueInactiveAfter: number;
   ranks: RankTier[];
   leaderboardMinMatches: number;
 }
@@ -127,7 +129,7 @@ export function loadSettings(env?: NodeJS.ProcessEnv): Settings {
     fs.mkdirSync(path.dirname(absoluteDbPath), { recursive: true });
   }
 
-  const formatRaw = optionalStr('MATCH_FORMAT', 'best_of_1', merged);
+  const formatRaw = optionalStr('MATCH_FORMAT', 'best_of_3', merged);
   const matchFormat: MatchFormat = formatRaw === 'best_of_3' ? 'best_of_3' : 'best_of_1';
 
   return {
@@ -152,6 +154,7 @@ export function loadSettings(env?: NodeJS.ProcessEnv): Settings {
       vote: optionalInt('TIMER_VOTE', 900, merged),
       faultReport: optionalInt('TIMER_FAULT_REPORT', 300, merged),
     },
+    queueInactiveAfter: optionalInt('QUEUE_INACTIVE_AFTER', 0, merged),
     ranks: [
       { name: 'Bronze', threshold: optionalInt('RANK_BRONZE', 1000, merged) },
       { name: 'Silver', threshold: optionalInt('RANK_SILVER', 1100, merged) },

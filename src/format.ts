@@ -1,9 +1,11 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { Settings, RankTier } from './config/settings';
-import { QueueEntryRow, MatchRow, UserRow, MapRow } from './types';
+import { QueueEntryRow, MatchRow, UserRow, MapRow, MatchStatus } from './types';
 import { rankForElo, displayRank, divisionForElo, divisionName } from './elo/rankManager';
 import { MatchRepository } from './database/repositories/matchRepository';
 import { EMBED_COLORS, relativeTimestamp, shortTimestamp, bullet } from './presentation/embeds';
+import { parseDbTimestamp } from './presentation/dbTime';
+import { BRAND_NAME, BRAND_SHORT, BRAND_FOOTER, EMOJI } from './presentation/brand';
 
 export function clampElo(n: number): number {
   return Math.max(0, Math.round(n));
@@ -27,66 +29,142 @@ export function rankProgress(elo: number, rank: RankTier, ranks: RankTier[]): nu
 // Queue panel
 // ---------------------------------------------------------------------------
 
-export function queueEmbed(entries: QueueEntryRow[], settings: Settings, enabledMaps?: number, queueActive = true): EmbedBuilder {
+/** Replaces "scrim-1234" with "svm-1234" for display, or keeps other ids. */
+export function prettyMatchId(matchId: string): string {
+  return matchId.startsWith('scrim-') ? `svm-${matchId.slice('scrim-'.length)}` : matchId;
+}
+
+/** The safe, lowercase base name of a match channel (e.g. svm-0042). */
+export function matchChannelBaseName(matchId: string): string {
+  return prettyMatchId(matchId).toLowerCase();
+}
+
+/** Status-aware channel name so the room title reflects the match phase. */
+export function matchChannelName(matchId: string, status: MatchStatus): string {
+  const base = matchChannelBaseName(matchId);
+  switch (status) {
+    case 'drafting':
+      return `${base}-draft`;
+    case 'awaiting_teamcode':
+      return `${base}-code`;
+    case 'awaiting_ready':
+      return `${base}-ready`;
+    case 'in_progress':
+      return `${base}-live`;
+    case 'voting':
+      return `${base}-vote`;
+    case 'confirmed':
+      return `${base}-done`;
+    case 'disputed':
+      return `${base}-dispute`;
+    case 'cancelled':
+      return `${base}-cancel`;
+    case 'timed_out':
+      return `${base}-timeout`;
+    case 'archived':
+      return `${base}-done`;
+    default:
+      return base;
+  }
+}
+
+/** Number of full game series each format targets (for the queue panel). */
+function seriesTarget(format: Settings['matchFormat']): string {
+  return format === 'best_of_3' ? 'first to win 2 games' : 'single game';
+}
+
+export function queueEmbed(
+  entries: QueueEntryRow[],
+  settings: Settings,
+  enabledMaps?: number,
+  queueActive = true
+): EmbedBuilder {
   const size = settings.queueSize;
+  const fmt = settings.matchFormat === 'best_of_3' ? 'Best of 3' : 'Best of 1';
+  const mm = settings.matchmakingMode === 'draft' ? 'Captain Draft' : 'Auto Balanced';
+  const status = queueActive ? `${EMOJI.join} Queue **OPEN**` : `${EMOJI.forbidden} Queue **LOCKED**`;
+  const waitingNeeded = Math.max(0, size - entries.length);
+
   const embed = new EmbedBuilder()
-    .setTitle('POWER LEAGUE | COMPETITIVE SCRIMS')
-    .setColor(EMBED_COLORS.info)
+    .setTitle(`${EMOJI.queue} ${BRAND_NAME} · 3v3 SCRIMS`)
+    .setColor(queueActive ? EMBED_COLORS.success : EMBED_COLORS.error)
     .setDescription(
-      '3V3 MATCHMAKING\n\n' +
-        `Queue Status: **${queueActive ? 'OPEN' : 'LOCKED'}**\n` +
-        `Players Waiting: **${entries.length}/${size}**`
+      `**${status}**\n` +
+        `Players in queue: **${entries.length}/${size}**\n` +
+        (waitingNeeded > 0 ? `Need **${waitingNeeded} more** to start a match.` : 'Queue is full — assembling teams…')
     );
 
   const lines: string[] = [];
   const slotCount = Math.max(size, entries.length);
   for (let i = 0; i < slotCount; i++) {
     const entry = entries[i];
-    lines.push(entry ? `${i + 1}. ${entry.username} — ${entry.elo_at_join} Elo` : `${i + 1}. Waiting...`);
+    if (entry) {
+      const waited = waitedTime(entry.joined_at);
+      lines.push(`${i + 1}. ${EMOJI.approved} **${entry.username}** — ${entry.elo_at_join} Elo · waiting ${waited}`);
+    } else {
+      lines.push(`${i + 1}. ${EMOJI.waiting} Waiting…`);
+    }
   }
-  embed.addFields({ name: 'Current Queue', value: lines.map((l) => `\`${l}\``).join('\n') });
+  embed.addFields({ name: 'CURRENT QUEUE', value: lines.map((l) => `\`${l}\``).join('\n') });
 
   const body: string[] = [];
   if (entries.length > 0) {
     const avg = Math.round(entries.reduce((a, e) => a + e.elo_at_join, 0) / entries.length);
-    body.push(`Average Queue Elo: **${avg}**`);
+    body.push(`Average elo: **${avg}**`);
   }
-  body.push(`Match Format: **${settings.matchFormat === 'best_of_3' ? 'Best of 3' : 'Best of 1'}**`);
-  body.push(`Matchmaking: **${settings.matchmakingMode === 'draft' ? 'Captain Draft' : 'Automatic Balanced'}**`);
+  body.push(`Format: **${fmt}** (${seriesTarget(settings.matchFormat)})`);
+  body.push(`Matchmaking: **${mm}**`);
   if (settings.minElo !== undefined || settings.maxElo !== undefined) {
     const min = settings.minElo ?? 0;
     const max = settings.maxElo ?? 15000;
-    body.push(`Elo Range: **${min} - ${max}**`);
+    body.push(`Elo range: **${min}–${max}**`);
   }
   if (enabledMaps !== undefined) {
-    body.push(`Map Pool: **${enabledMaps} maps enabled**`);
+    body.push(`Map pool: **${enabledMaps}** enabled`);
   }
-  embed.addFields({ name: 'Matchmaking Settings', value: body.join('\n') || 'Default settings' });
-  embed.setFooter({ text: 'Six players start a scrim automatically.' });
+  embed.addFields({ name: 'SETTINGS', value: body.join('\n') });
+
+  embed.setFooter({ text: `${BRAND_FOOTER} · six ready players start a scrim` });
   return embed;
+}
+
+/** "2m 10s" wait label from a join timestamp. */
+function waitedTime(iso: string): string {
+  const ms = Date.now() - parseDbTimestamp(iso);
+  if (Number.isNaN(ms) || ms < 0) return 'just now';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rest = s - m * 60;
+  return `${m}m ${rest}s`;
 }
 
 export function queueActionRows(): ActionRowBuilder<ButtonBuilder>[] {
   const join = new ButtonBuilder()
     .setCustomId('queue:join')
-    .setLabel('JOIN QUEUE')
-    .setStyle(ButtonStyle.Success);
+    .setLabel('Join Queue')
+    .setStyle(ButtonStyle.Success)
+    .setEmoji('✅');
   const leave = new ButtonBuilder()
     .setCustomId('queue:leave')
-    .setLabel('LEAVE QUEUE')
-    .setStyle(ButtonStyle.Danger);
+    .setLabel('Leave Queue')
+    .setStyle(ButtonStyle.Danger)
+    .setEmoji('🚪');
   const refresh = new ButtonBuilder()
     .setCustomId('queue:refresh')
-    .setLabel('REFRESH')
-    .setStyle(ButtonStyle.Secondary);
+    .setLabel('Refresh')
+    .setStyle(ButtonStyle.Secondary)
+    .setEmoji('🔄');
   const profile = new ButtonBuilder()
     .setCustomId('queue:profile')
-    .setLabel('MY PROFILE')
-    .setStyle(ButtonStyle.Secondary);
+    .setLabel('My Profile')
+    .setStyle(ButtonStyle.Primary)
+    .setEmoji('👤');
   const leaderboard = new ButtonBuilder()
     .setCustomId('queue:leaderboard')
-    .setLabel('LEADERBOARD')
-    .setStyle(ButtonStyle.Secondary);
+    .setLabel('Leaderboard')
+    .setStyle(ButtonStyle.Primary)
+    .setEmoji('🏆');
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(join, leave, refresh);
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(profile, leaderboard);
@@ -129,28 +207,31 @@ export interface MatchView {
   fault?: FaultDashboard;
 }
 
+/** Human-friendly, progress-oriented status for the match embed. */
 export function matchStatusLine(match: MatchRow): string {
   switch (match.status) {
+    case 'drafting':
+      return 'Phase: **captain draft in progress** — pick your teams';
     case 'awaiting_teamcode':
-      return 'STATUS: Waiting for TeamCode';
+      return 'Phase: **waiting for TeamCode** — join the in-game lobby with the code';
     case 'awaiting_ready':
-      return 'STATUS: Waiting for readiness';
+      return 'Phase: **waiting for everyone to ready in-game**';
     case 'in_progress':
-      return 'STATUS: Match in progress';
+      return 'Phase: **match is live** — good luck!';
     case 'voting':
-      return 'STATUS: Result voting in progress';
+      return 'Phase: **result voting** — cast a private vote';
     case 'confirmed':
-      return `STATUS: Confirmed - Winner: ${winnerLabel(match.winner)}`;
+      return `Phase: **completed** — ${EMOJI.trophy} Winner: **${winnerLabel(match.winner)}**`;
     case 'disputed':
-      return 'STATUS: Disputed (awaiting staff)';
+      return 'Phase: **disputed** — staff must resolve this match';
     case 'cancelled':
-      return `STATUS: Cancelled - ${match.cancellation_reason ?? 'no reason'}`;
+      return `Phase: **cancelled** — ${match.cancellation_reason ?? 'no reason given'}`;
     case 'timed_out':
-      return `STATUS: Timed out - ${match.cancellation_reason ?? 'no reason'}`;
+      return `Phase: **timed out** — ${match.cancellation_reason ?? 'no reason given'}`;
     case 'archived':
-      return 'STATUS: Archived';
+      return 'Phase: **archived**';
     default:
-      return 'STATUS: Unknown';
+      return 'Phase: unknown';
   }
 }
 
@@ -179,7 +260,7 @@ function matchColor(match: MatchRow): number {
 export function buildMatchEmbed(view: MatchView): EmbedBuilder {
   const { match, teamA, teamB } = view;
   const embed = new EmbedBuilder()
-    .setTitle(`SCRIM MATCH #${match.match_id.replace('scrim-', '')}`)
+    .setTitle(`${EMOJI.queue} ${BRAND_SHORT} MATCH · ${prettyMatchId(match.match_id).toUpperCase()}`)
     .setColor(matchColor(match))
     .setDescription(matchStatusLine(match));
 
@@ -188,72 +269,67 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
     players
       .map((p) => {
         const rank = displayRank(p.elo, ranks);
-        return `<@${p.id}> — ${p.elo} Elo (${rank})`;
+        return `${EMOJI.approved} <@${p.id}> — ${p.elo} Elo (${rank})`;
       })
       .join('\n');
 
   embed.addFields(
-    { name: `TEAM A${match.winner === 'A' ? ' (WINNER)' : ''}`, value: teamLines(teamA), inline: true },
-    { name: `TEAM B${match.winner === 'B' ? ' (WINNER)' : ''}`, value: teamLines(teamB), inline: true }
+    { name: `TEAM A${match.winner === 'A' ? ' · WINNER' : ''}`, value: teamLines(teamA), inline: true },
+    { name: `TEAM B${match.winner === 'B' ? ' · WINNER' : ''}`, value: teamLines(teamB), inline: true }
   );
 
   const details: string[] = [];
-  details.push(`Game Mode: **${match.game_mode ?? 'Not configured'}**`);
-  details.push(`Map: **${match.map ?? 'Not selected'}**`);
-  details.push(`Format: **${match.format === 'best_of_3' ? 'Best of 3' : 'Best of 1'}**`);
-  details.push(`Matchmaking: **${match.matchmaking === 'draft' ? 'Captain Draft' : 'Automatic Balanced'}**`);
-  if (match.status === 'awaiting_ready' || match.status === 'in_progress') {
-    if (match.format === 'best_of_3') {
-      details.push(`Series: **${match.team_a_score}-${match.team_b_score}** (first to 2 of 3)`);
-    } else {
-      details.push(`Series: **${match.team_a_score}-${match.team_b_score}** (single game)`);
-    }
+  details.push(`${EMOJI.map} Map: **${match.map ?? 'Not selected'}** · Mode: **${match.game_mode ?? '—'}**`);
+  details.push(`📏 Format: **${match.format === 'best_of_3' ? 'Best of 3' : 'Best of 1'}** · ${match.matchmaking === 'draft' ? 'Captain Draft' : 'Auto Balanced'}`);
+  if (match.status === 'awaiting_ready' || match.status === 'in_progress' || match.status === 'voting') {
+    const target = match.format === 'best_of_3' ? 'first to 2 of 3' : 'single game';
+    details.push(`🔢 Series: **${match.team_a_score}–${match.team_b_score}** (${target})`);
   }
   if (match.status === 'confirmed' || match.status === 'disputed') {
-    details.push(`Final Score: **${match.team_a_score} - ${match.team_b_score}**`);
-    if (match.winner) details.push(`Winner: **${winnerLabel(match.winner)}**`);
+    details.push(`🔢 Final score: **${match.team_a_score}–${match.team_b_score}**`);
+    if (match.winner) details.push(`🏅 Winner: **${winnerLabel(match.winner)}**`);
   }
   if (match.status === 'voting') {
-    details.push(`Votes: **${view.votesCount}/6** cast (choices stay private until voting ends)`);
+    details.push(`🗳️ Votes: **${view.votesCount}/6** cast — choices stay private until voting ends`);
   }
   if (match.status === 'confirmed' || match.status === 'disputed') {
     const countLine = Object.entries(view.voteTotals)
       .filter(([, c]) => c > 0)
       .map(([k, c]) => `${k === 'A' ? 'Team A' : k === 'B' ? 'Team B' : 'Draw'}: ${c}`)
-      .join('  |  ');
-    if (countLine) details.push(countLine);
+      .join(' · ');
+    if (countLine) details.push(`🗳️ Final votes: ${countLine}`);
   }
   if (match.team_code) {
-    details.push('TeamCode: submitted');
+    details.push(`🔑 TeamCode: **submitted** (keep it in this channel only)`);
   }
   if (match.created_at) {
-    details.push(`Created: ${relativeTimestamp(match.created_at)}`);
+    details.push(`🕒 Created: ${relativeTimestamp(match.created_at)}`);
   }
 
-  embed.addFields({ name: 'Match Details', value: details.join('\n') });
+  embed.addFields({ name: 'MATCH DETAILS', value: details.join('\n') });
 
   // Live fault-report dashboard for cancelled / timed-out matches.
   if (view.fault && (match.status === 'cancelled' || match.status === 'timed_out')) {
     const fault = view.fault;
     const lines: string[] = [];
-    lines.push(`**${fault.reporterCount}/${fault.participantCount}** players have reported`);
+    lines.push(`📋 **${fault.reporterCount}/${fault.participantCount}** players have reported`);
     if (fault.reporterCount >= fault.participantCount) {
-      lines.push('All participants have reported — the report window is closed.');
+      lines.push('All participants reported — suggestions are closed.');
     }
-    const dodges = fault.dodges.map((d) => `⚠️ <@${d.reported_player_id}> — ${d.reports} reports (${d.status.replace(/_/g, ' ')} )`).join('\n');
+    const dodges = fault.dodges.map((d) => `⚠️ <@${d.reported_player_id}> — ${d.reports} reports (${d.status.replace(/_/g, ' ')})`).join('\n');
     if (dodges) lines.push(dodges);
     const playerLines = fault.byReported
       .map((t) => `<@${t.reported_player_id}> — **${t.count}** report${t.count === 1 ? '' : 's'}${Object.keys(t.reasons).length ? ` (${Object.entries(t.reasons).map(([k, v]) => `${k}: ${v}`).join(', ')})` : ''}`)
       .join('\n');
     if (playerLines) {
-      lines.push('**Player reports**');
+      lines.push('**Accusations**');
       lines.push(playerLines);
     }
     const generalEntries = Object.entries(fault.general);
     if (generalEntries.length) {
       lines.push(`**General** — ${generalEntries.map(([k, v]) => `${k}: ${v}`).join(', ')}`);
     }
-    lines.push('**Rule:** if **4 players from both teams** report the same player, staff is notified for review.');
+    lines.push('**Rule:** if **4 players from both teams** accuse the same player, staff is notified.');
     embed.addFields({ name: 'FAULT REPORTS', value: lines.join('\n') });
   }
 
@@ -262,26 +338,26 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
     const readyMembers = new Set(view.ready);
     const participants = [...teamA, ...teamB];
     const allReady = readyMembers.size >= participants.length;
-    const sections = ['MATCH READINESS'];
+    const sections: string[] = [];
     for (const [label, team] of [
       ['TEAM A', teamA],
       ['TEAM B', teamB],
     ] as const) {
-      sections.push(label);
+      sections.push(`**${label}**`);
       for (const p of team) {
         const isReady = readyMembers.has(p.id);
-        sections.push(`${isReady ? 'READY' : 'WAITING'}  <@${p.id}>`);
+        sections.push(`${isReady ? EMOJI.ready : '🔘'} <@${p.id}> — ${isReady ? 'READY' : 'WAITING'}`);
       }
     }
-    sections.push(`${readyMembers.size}/${participants.length} PLAYERS READY`);
+    sections.push(`${EMOJI.ready} **${readyMembers.size}/${participants.length}** players ready`);
     const waiting = participants.filter((p) => !readyMembers.has(p.id));
     if (waiting.length > 0 && !allReady) {
-      sections.push(`Players Waiting: ${waiting.map((p) => `<@${p.id}>`).join(' ')}`);
+      sections.push(`🔎 Still waiting: ${waiting.map((p) => `<@${p.id}>`).join(' ')}`);
     }
-    embed.addFields({ name: 'Readiness', value: sections.join('\n') });
+    embed.addFields({ name: 'READINESS', value: sections.join('\n') });
   }
 
-  embed.setFooter({ text: match.match_id });
+  embed.setFooter({ text: `${prettyMatchId(match.match_id)} · ${BRAND_NAME}` });
   return embed;
 }
 
@@ -300,30 +376,30 @@ export function matchActionRows(actions: MatchActions): ActionRowBuilder<ButtonB
   const main: Array<ButtonBuilder | null> = [];
   if (actions.vote) {
     main.push(
-      new ButtonBuilder().setCustomId('vote:A').setLabel('TEAM A WON').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('vote:B').setLabel('TEAM B WON').setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId('vote:draw').setLabel('DRAW').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('vote:A').setLabel('Team A won').setStyle(ButtonStyle.Success).setEmoji('🅰️'),
+      new ButtonBuilder().setCustomId('vote:B').setLabel('Team B won').setStyle(ButtonStyle.Danger).setEmoji('🅱️'),
+      new ButtonBuilder().setCustomId('vote:draw').setLabel('Draw').setStyle(ButtonStyle.Secondary).setEmoji('🤝')
     );
   } else {
     if (actions.teamCode) {
-      main.push(new ButtonBuilder().setCustomId('match:teamcode').setLabel('TEAM CODE').setStyle(ButtonStyle.Primary));
+      main.push(new ButtonBuilder().setCustomId('match:teamcode').setLabel('TeamCode').setStyle(ButtonStyle.Primary).setEmoji('🔑'));
     }
     if (actions.ready) {
-      main.push(new ButtonBuilder().setCustomId('match:ready').setLabel('READY (JOINED TEAM)').setStyle(ButtonStyle.Success));
+      main.push(new ButtonBuilder().setCustomId('match:ready').setLabel('Ready · I joined in-game').setStyle(ButtonStyle.Success).setEmoji('✅'));
     }
     if (actions.copyCode) {
-      main.push(new ButtonBuilder().setCustomId('match:copycode').setLabel('COPY / VIEW CODE').setStyle(ButtonStyle.Secondary));
+      main.push(new ButtonBuilder().setCustomId('match:copycode').setLabel('View TeamCode').setStyle(ButtonStyle.Secondary).setEmoji('👁️'));
     }
     if (actions.finished) {
-      main.push(new ButtonBuilder().setCustomId('match:finished').setLabel('MATCH FINISHED').setStyle(ButtonStyle.Primary));
+      main.push(new ButtonBuilder().setCustomId('match:finished').setLabel('Match finished').setStyle(ButtonStyle.Primary).setEmoji('🏁'));
     }
     if (actions.cancel) {
-      main.push(new ButtonBuilder().setCustomId('match:cancel').setLabel('CANCEL / REPORT ISSUE').setStyle(ButtonStyle.Danger));
+      main.push(new ButtonBuilder().setCustomId('match:cancel').setLabel('Cancel / issue').setStyle(ButtonStyle.Danger).setEmoji('🚫'));
     }
   }
   if (actions.faultButtons) {
     main.push(
-      new ButtonBuilder().setCustomId('fault:select').setLabel('REPORT WHAT HAPPENED').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('fault:select').setLabel('What happened?').setStyle(ButtonStyle.Secondary).setEmoji('📋')
     );
   }
   const nonNull = main.filter((b): b is ButtonBuilder => b !== null);
@@ -348,25 +424,29 @@ export function profileEmbed(user: UserRow, settings: Settings, mapStats?: Array
   const isTopRank = ranks.findIndex((r) => r.name === rank.name) === ranks.length - 1;
 
   const embed = new EmbedBuilder()
-    .setTitle('PLAYER PROFILE')
+    .setTitle(`${EMOJI.profile} PLAYER PROFILE`)
     .setDescription(`Player: <@${user.discord_id}>`)
     .setColor(EMBED_COLORS.competitive)
     .addFields(
       {
-        name: 'COMPETITIVE RATING',
-        value: `${user.elo} ELO\nRANK: **${displayRank(user.elo, ranks)}**${isTopRank ? '' : ` (Division ${divisionName(division)})`}`,
+        name: '🏆 COMPETITIVE RATING',
+        value: `${user.elo} Elo\nRank: **${displayRank(user.elo, ranks)}**${isTopRank ? '' : ` · ${divisionName(division)}`}`,
         inline: false,
       },
-      { name: 'Next Rank Progress', value: `${progress}%`, inline: true },
+      { name: 'Next rank', value: `${progress}%`, inline: true },
       { name: 'Peak Elo', value: `${user.peak_elo}`, inline: true },
-      { name: 'CAREER STATISTICS', value: `Matches: ${user.total_matches}\nWins: ${user.wins}\nLosses: ${user.losses}\nDraws: ${user.draws}\nWin Rate: ${winRate}%`, inline: false },
-      { name: 'Streaks', value: `Current: ${streakLabel}\nBest: ${user.best_streak}`, inline: true }
+      {
+        name: '📊 CAREER',
+        value: `Matches: **${user.total_matches}**\nWins: **${user.wins}** · Losses: **${user.losses}** · Draws: **${user.draws}**\nWin rate: **${winRate}%**`,
+        inline: false,
+      },
+      { name: '🔥 Streaks', value: `Current: ${streakLabel}\nBest: ${user.best_streak}`, inline: true }
     );
   if (user.created_at) {
-    embed.addFields({ name: 'Registered', value: shortTimestamp(user.created_at), inline: true });
+    embed.addFields({ name: '📅 Registered', value: shortTimestamp(user.created_at), inline: true });
   }
   if (user.last_match_at) {
-    embed.addFields({ name: 'Last Match', value: relativeTimestamp(user.last_match_at), inline: true });
+    embed.addFields({ name: '💀 Last match', value: relativeTimestamp(user.last_match_at), inline: true });
   }
   if (mapStats && mapStats.length > 0) {
     const lines = mapStats
@@ -377,8 +457,9 @@ export function profileEmbed(user: UserRow, settings: Settings, mapStats?: Array
         return `${s.map}: ${s.wins}W/${s.losses}L (${rate}%)`;
       })
       .join('\n');
-    embed.addFields({ name: 'TOP MAPS', value: lines || 'No data', inline: false });
+    embed.addFields({ name: '🗺️ TOP MAPS', value: lines || 'No data', inline: false });
   }
+  embed.setFooter({ text: BRAND_NAME });
   return embed;
 }
 
@@ -390,14 +471,16 @@ export function leaderboardEmbed(
   pages: number,
   settings: Settings
 ): EmbedBuilder {
+  const medal = (i: number): string => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${startIndex + i + 1}.`);
   const embed = new EmbedBuilder()
-    .setTitle('SCRIM LEADERBOARD')
+    .setTitle(`${EMOJI.leaderboard} ${BRAND_NAME} · LEADERBOARD`)
     .setColor(EMBED_COLORS.competitive)
-    .setDescription(`Sorted by current Elo | Page ${page + 1}/${pages}`);
+    .setDescription(`Sorted by Elo · page **${page + 1}/${pages}**`);
   const lines = rows.map((r, i) => {
-    return `#${startIndex + i + 1} **${r.username}** — ${r.elo} Elo (${displayRank(r.elo, settings.ranks)}) | ${r.wins}W/${r.losses}L`;
+    return `${medal(i)} **${r.username}** — ${r.elo} Elo · ${displayRank(r.elo, settings.ranks)} · ${r.wins}W/${r.losses}L`;
   });
-  embed.addFields({ name: `Top players (${total})`, value: lines.join('\n') || 'No players yet' });
+  embed.addFields({ name: `Top players`, value: lines.join('\n') || 'No players yet' });
+  embed.setFooter({ text: BRAND_NAME });
   return embed;
 }
 
@@ -409,18 +492,19 @@ export function historyEmbed(
   repo: MatchRepository
 ): EmbedBuilder {
   const embed = new EmbedBuilder()
-    .setTitle('MATCH HISTORY')
+    .setTitle(`${EMOJI.queue} ${BRAND_NAME} · MATCH HISTORY`)
     .setColor(EMBED_COLORS.competitive)
-    .setDescription(`Recent matches | Page ${page + 1}/${pages}`);
+    .setDescription(`Previous matches · page **${page + 1}/${pages}**`);
 
   const lines = rows.map(({ match, eloChange }) => {
     const teamA = repo.teamAIds(match);
     const onA = teamA.includes(userId);
     const outcome = match.winner === null ? '—' : match.winner === 'draw' ? 'DRAW' : onA === (match.winner === 'A') ? 'WIN' : match.status === 'cancelled' || match.status === 'timed_out' ? statusShort(match.status) : 'LOSS';
     const elo = eloChange === null ? '' : `${eloChange >= 0 ? '+' : ''}${eloChange} Elo`;
-    return `**#${match.match_id.replace('scrim-', '')}** ${shortTimestamp(match.created_at)} | ${statusShort(match.status)} | ${onA ? 'TEAM A' : 'TEAM B'} | ${match.map ?? '?'}\n↳ ${outcome}${elo ? ' | ' + elo : ''}`;
+    return `**${prettyMatchId(match.match_id.toUpperCase())}** · ${shortTimestamp(match.created_at)} · ${statusShort(match.status)} · ${onA ? 'TEAM A' : 'TEAM B'} · ${match.map ?? '?'}\n↳ ${outcome}${elo ? ' · ' + elo : ''}`;
   });
   embed.addFields({ name: 'Recent matches', value: lines.join('\n') || 'No matches yet' });
+  embed.setFooter({ text: BRAND_NAME });
   return embed;
 }
 
@@ -434,8 +518,9 @@ function statusShort(status: MatchRow['status']): string {
 
 export function mapsEmbed(maps: MapRow[], recent: Array<{ id: number; name: string; match_id: string | null; selected_at: string }>): EmbedBuilder {
   const embed = new EmbedBuilder()
-    .setTitle('MAP POOL')
-    .setColor(EMBED_COLORS.info);
+    .setTitle(`${EMOJI.map} ${BRAND_NAME} · MAP POOL`)
+    .setColor(EMBED_COLORS.info)
+    .setDescription(`${enabledCount(maps)} enabled · ${maps.length - enabledCount(maps)} disabled`);
   const enabled = maps.filter((m) => m.enabled === 1);
   const disabled = maps.filter((m) => m.enabled === 0);
 
@@ -453,24 +538,31 @@ export function mapsEmbed(maps: MapRow[], recent: Array<{ id: number; name: stri
     }
   }
   if (modeLines.length) {
-    embed.addFields({ name: `Enabled (${enabled.length})`, value: modeLines.join('\n') || 'None' });
+    embed.addFields({ name: 'ENABLED', value: modeLines.join('\n') || 'None' });
   } else {
     embed.addFields({
-      name: `Enabled (${enabled.length})`,
+      name: 'ENABLED',
       value: enabled.map((m) => bullet(m.name)).join('\n') || 'None',
     });
   }
-  embed.addFields({
-    name: `Disabled (${disabled.length})`,
-    value: disabled.map((m) => bullet(m.name)).join('\n') || 'None',
-  });
+  if (disabled.length) {
+    embed.addFields({
+      name: 'DISABLED',
+      value: disabled.map((m) => bullet(m.name)).join('\n') || 'None',
+    });
+  }
   if (recent.length) {
     embed.addFields({
       name: 'Recently used',
       value: recent.map((r) => bullet(`${r.name} (${relativeTimestamp(r.selected_at)})`)).join('\n'),
     });
   }
+  embed.setFooter({ text: BRAND_NAME });
   return embed;
+}
+
+function enabledCount(maps: MapRow[]): number {
+  return maps.filter((m) => m.enabled === 1).length;
 }
 
 export { rankForElo };

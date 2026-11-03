@@ -40,7 +40,7 @@ export class MatchRepository {
     return this.teamAIds(match).includes(discordId) || this.teamBIds(match).includes(discordId);
   }
 
-  /** Allocates the next sequential match number and returns `scrim-XXXX`. */
+  /** Allocates the next sequential match number; stored as `scrim-XXXX` (displayed as `svm-XXXX`). */
   nextMatchId(): string {
     const result = this.db.prepare('INSERT INTO matches_seq (id) VALUES (NULL)').run();
     return `scrim-${String(result.lastInsertRowid).padStart(4, '0')}`;

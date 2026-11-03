@@ -141,15 +141,15 @@ export class CommandHandler {
       return;
     }
     if (active.channel_id) {
-      await interaction.reply({ content: `Your current match: <#${active.channel_id}>`, flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: `🎮 Your current match: <#${active.channel_id}>`, flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.reply({ content: `You are in match ${active.match_id}.`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: `🎮 You are in match **${active.match_id}**.`, flags: MessageFlags.Ephemeral });
   }
 
   private async leaveQueue(interaction: ChatInputCommandInteraction): Promise<void> {
     const result = await this.ctx.queue.leave(interaction.user.id);
-    await interaction.reply({ content: result.ok ? 'You left the queue.' : result.error ?? 'Could not leave.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: result.ok ? '🚪 You left the queue.' : result.error ?? 'Could not leave.', flags: MessageFlags.Ephemeral });
     await this.ctx.queue.refreshPanel().catch(() => {});
   }
 }

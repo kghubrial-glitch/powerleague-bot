@@ -13,6 +13,7 @@ import { rankForElo } from '../elo/rankManager';
 import { queueEmbed, queueActionRows } from '../format';
 import { GAME_MODES, GAME_MODE_CHOICES, isGameMode } from '../matchmaking/gameModes';
 import { isStaff } from './commands';
+import { BRAND_NAME } from '../presentation/brand';
 
 export type AnyCommandBuilder = SlashCommandBuilder | ReturnType<SlashCommandBuilder['addSubcommandGroup']> | ReturnType<SlashCommandBuilder['addSubcommand']>;
 
@@ -26,14 +27,14 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
     s
       .setName('cancel')
       .setDescription('Cancel an active match.')
-      .addStringOption((o) => o.setName('match_id').setDescription('scrim-XXXX').setRequired(true))
+      .addStringOption((o) => o.setName('match_id').setDescription('svm-XXXX').setRequired(true))
       .addStringOption((o) => o.setName('reason').setDescription('Cancellation reason.').setRequired(false))
   );
   scrim.addSubcommand((s) =>
     s
       .setName('result')
       .setDescription('Manually confirm/correct a match result (applies Elo once).')
-      .addStringOption((o) => o.setName('match_id').setDescription('scrim-XXXX').setRequired(true))
+      .addStringOption((o) => o.setName('match_id').setDescription('svm-XXXX').setRequired(true))
       .addStringOption((o) =>
         o
           .setName('winner')
@@ -95,7 +96,7 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
     s
       .setName('resetcode')
       .setDescription('Reset the TeamCode of a match so a new one can be submitted.')
-      .addStringOption((o) => o.setName('match_id').setDescription('scrim-XXXX').setRequired(true))
+      .addStringOption((o) => o.setName('match_id').setDescription('svm-XXXX').setRequired(true))
   );
   scrim.addSubcommand((s) =>
     s
@@ -124,7 +125,7 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
     s
       .setName('dodge')
       .setDescription('Moderator decision on a dodge report.')
-      .addStringOption((o) => o.setName('match_id').setDescription('scrim-XXXX').setRequired(true))
+      .addStringOption((o) => o.setName('match_id').setDescription('svm-XXXX').setRequired(true))
       .addUserOption((o) => o.setName('player').setDescription('Reported player.').setRequired(true))
       .addStringOption((o) =>
         o
@@ -207,7 +208,7 @@ export class AdminCommandHandler {
         components: queueActionRows(),
       });
       this.ctx.db.repos.panels.set(channel.id, message.id);
-      await interaction.editReply({ content: 'Matchmaking panel created.' });
+      await interaction.editReply({ content: '✅ Matchmaking panel created here. Players can now join the queue.' });
       this.ctx.db.repos.audits.log({
         action: 'panel_created',
         administrator_id: interaction.user.id,
@@ -225,7 +226,7 @@ export class AdminCommandHandler {
     const matchId = interaction.options.getString('match_id', true);
     const reason = interaction.options.getString('reason') ?? 'Cancelled by an administrator';
     const ok = await this.ctx.matches.cancelMatch(matchId, reason, 'cancelled', interaction.user.id);
-    await interaction.reply({ content: ok ? `Match ${matchId} cancelled.` : `Could not cancel ${matchId} (not found or already ended).`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: ok ? `🚫 Match **${matchId}** cancelled.` : `Could not cancel **${matchId}** — not found or already ended.`, flags: MessageFlags.Ephemeral });
   }
 
   private async result(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -235,7 +236,7 @@ export class AdminCommandHandler {
     const scoreA = interaction.options.getInteger('score_a') ?? undefined;
     const scoreB = interaction.options.getInteger('score_b') ?? undefined;
     const result = await this.ctx.matches.adminResolve(matchId, winner, interaction.user.id, scoreA, scoreB);
-    await interaction.reply({ content: result.ok ? `Match ${matchId} resolved with winner ${winner.toUpperCase()}.` : result.error, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: result.ok ? `🏆 Match **${matchId}** resolved — winner: **${winner.toUpperCase()}**. Elo updated.` : result.error, flags: MessageFlags.Ephemeral });
   }
 
   private async eloAdjust(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -246,7 +247,7 @@ export class AdminCommandHandler {
     this.ctx.db.repos.users.applyEloChange(user.discord_id, 'admin-adjust', user.elo, amount, amount >= 0 ? 'win' : 'loss', now);
     const updated = this.ctx.db.repos.users.getById(user.discord_id)!;
     await interaction.reply({
-      content: `Adjusted ${target.username}: ${amount >= 0 ? '+' : ''}${amount} Elo. New Elo: ${updated.elo} (peak ${updated.peak_elo}).`,
+      content: `📈 Adjusted **${target.username}**: ${amount >= 0 ? '+' : ''}${amount} Elo → **${updated.elo}** (peak ${updated.peak_elo}). Logged for audit.`,
       flags: MessageFlags.Ephemeral,
     });
     this.ctx.db.repos.audits.log({
@@ -314,7 +315,7 @@ export class AdminCommandHandler {
     const reason = interaction.options.getString('reason') ?? 'Set by an administrator';
     const until = new Date(Date.now() + minutes * 60_000).toISOString();
     this.ctx.db.repos.cooldowns.set(target.id, until, reason, interaction.user.id);
-    await interaction.reply({ content: `${target.username} is on a matchmaking cooldown for ${minutes} minutes.`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: `⛔ **${target.username}** is now on a matchmaking cooldown for **${minutes}** minutes.`, flags: MessageFlags.Ephemeral });
     this.ctx.db.repos.audits.log({
       action: 'cooldown_applied',
       administrator_id: interaction.user.id,
@@ -333,7 +334,7 @@ export class AdminCommandHandler {
     const inQueue = this.ctx.db.repos.queue.count();
 
     const embed = new EmbedBuilder()
-      .setTitle('SCRIM STATISTICS')
+      .setTitle(`📊 ${BRAND_NAME} · Server statistics`)
       .setColor(0x2ecc71)
       .addFields(
         { name: 'Registered players', value: `${total}`, inline: true },

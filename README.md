@@ -1,10 +1,10 @@
-# powerleague-bot
+# SvM Power League
 
-A Discord bot for organizing **Brawl Stars 3v3 scrims** (bs-nb), inspired by the
-original Power League format. Players queue up, the bot drafts two Elo-balanced
-teams, drops them into a private channel with a TeamCode and ready check, and
-after the series the players vote on the result. Confirmed results update Elo,
-profiles, streaks and the leaderboard.
+A Discord bot for organizing **Brawl Stars 3v3 scrims** for **SvM Power League**,
+inspired by the original Power League format. Players queue up, the bot drafts
+two Elo-balanced teams, drops them into a private channel with a TeamCode and
+ready check, and after the series the players vote on the result. Confirmed
+results update Elo, profiles, streaks and the leaderboard.
 
 > This is a coordination bot only. It never connects to, controls, or modifies
 > the Brawl Stars client.
@@ -13,8 +13,11 @@ profiles, streaks and the leaderboard.
 
 ## Features
 
-- **Persistent matchmaking panel** — permanent embed with Join/Leave/Refresh
-  buttons. Queue state lives in SQLite and survives restarts.
+- **Persistent matchmaking panel** — permanent SvM-branded embed with
+  Join/Leave/Refresh buttons plus quick Profile and Leaderboard buttons. Queue
+  state lives in SQLite and survives restarts. Idle players waiting too long
+  without a match (no join activity) are auto-removed via `QUEUE_INACTIVE_AFTER`
+  and notified so the queue never fills with ghosts.
 - **Elo-balanced random teams** — evaluates all 10 unique 3v3 splits, keeps the
   balanced ones (configurable tolerance), draws one at random, and randomly
   assigns Team A / Team B.
@@ -36,8 +39,12 @@ profiles, streaks and the leaderboard.
   modal; the first valid submission is locked in, staff can reset it.
 - **Readiness check** — each player presses READY after joining; once all six
   are ready the match starts and the series deadline begins.
-- **Single-game matches (default)** — each match is one game (Best of 1). A
-  Best-of-3 mode is available via `MATCH_FORMAT=best_of_3`.
+- **Best-of-3 by default** — follows the original Power League format
+  (first team to win two games wins the series). `MATCH_FORMAT=best_of_1` is
+  available for single-game scrims.
+- **Status-aware match channels** — channel names track the match phase
+  (`svm-0042-code`, `...-ready`, `...-live`, `...-vote`, `...-done`,
+  `...-cancel`) instead of staying static.
 - **Result voting** — a participant proposes the winner; the six players vote
   privately. A result needs **4 of 6** matching votes **including at least one
   vote from each team**. Unresolved votes are marked disputed for staff.
@@ -153,7 +160,8 @@ never has its token wiped. Values are resolved in priority order:
 | `QUEUE_SIZE` | `6` | Players needed to start a match. |
 | `MIN_ELO` / `MAX_ELO` | unset | Optional queue Elo range. |
 | `TEAM_BALANCE_TOLERANCE` | `40` | Max average-Elo gap vs. the best split still considered. |
-| `MATCH_FORMAT` | `best_of_1` | `best_of_1` (default) or `best_of_3`. |
+| `MATCH_FORMAT` | `best_of_3` | `best_of_3` (default) or `best_of_1`. |
+| `QUEUE_INACTIVE_AFTER` | `0` | Seconds a player can sit idle in the queue before being auto-removed (`0` = disabled). |
 | `MATCHMAKING_MODE` | `auto` | `auto` (balanced teams) or `draft` (captain draft). Runtime-togglable via `/scrim matchmaking`. |
 | `MAP_ROTATION_MODE` | `unique` | `unique` avoids recently used maps, `random` is fully random. |
 | `TIMER_TEAMCODE` | `300` | Seconds to submit a TeamCode, else the match is cancelled. |
@@ -206,12 +214,15 @@ All admin commands require the configured `STAFF_ROLE_ID` or
 
 1. Six players press **JOIN QUEUE**.
 2. The bot locks the queue and drafts two Elo-balanced teams.
-3. A private channel `scrim-0042` is created with the map and format.
+3. A private channel `svm-0042-code` is created with the teams, map and format
+   (the title changes as the match moves through ready → live → vote → done).
 4. Anyone submits the in-game **TeamCode** (modal) — locked after first accept.
 5. Everyone presses **READY** once they join the in-game team.
 6. The series starts; the winner is proposed via **MATCH FINISHED**.
 7. The six players vote privately. 4 matching votes across both teams confirm.
 8. Confirmed results update Elo exactly once and stats/leaderboard refresh.
+9. The public **match logs** channel shows the status and both teams from the
+   moment the match is found.
 
 If a step times out, the bot cancels the match, keeps Elo untouched, and opens
 fault reporting so moderators can review. Each player can report once; if 4

@@ -13,9 +13,11 @@
   "MIN_ELO": "",
   "MAX_ELO": "",
   "TEAM_BALANCE_TOLERANCE": 40,
-  "MATCH_FORMAT": "best_of_1",
+  "MATCH_FORMAT": "best_of_3",
   "MATCHMAKING_MODE": "auto",
   "MAP_ROTATION_MODE": "unique",
+
+  "QUEUE_INACTIVE_AFTER": 0,
 
   "TIMER_TEAMCODE": 300,
   "TIMER_READY": 300,

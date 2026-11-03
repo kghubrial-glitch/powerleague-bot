@@ -1,6 +1,8 @@
 import { EmbedBuilder, TextChannel, Message } from 'discord.js';
 import { AppContext } from '../context';
 import { EMBED_COLORS, shortTimestamp } from '../presentation/embeds';
+import { BRAND_NAME, BRAND_SHORT, EMOJI } from '../presentation/brand';
+import { prettyMatchId } from '../format';
 
 /**
  * Maintains one public "Match Logs" message per match in a dedicated logs
@@ -92,24 +94,33 @@ export class MatchLogs {
         .join(', ');
 
     const embed = new EmbedBuilder()
-      .setTitle(`SCRIM #${matchId.replace('scrim-', '')}`)
+      .setTitle(`${EMOJI.queue} ${BRAND_SHORT} · ${prettyMatchId(matchId).toUpperCase()}`)
       .setColor(colorFor(match.status))
       .setDescription(matchStatusPublic(match))
       .addFields(
-        { name: 'TEAM A', value: names(teamA) || '...', inline: true },
-        { name: 'TEAM B', value: names(teamB) || '...', inline: true }
+        { name: '🅰️ TEAM A', value: names(teamA) || '...', inline: true },
+        { name: '🅱️ TEAM B', value: names(teamB) || '...', inline: true }
       )
       .addFields({
-        name: 'MATCH',
-        value: `${match.map ?? 'No map'}${match.game_mode ? ` (${match.game_mode})` : ''} | ${match.format === 'best_of_3' ? 'Best of 3' : 'Best of 1'}${
-          match.matchmaking === 'draft' ? ' | Captain Draft' : ''
+        name: '🗺️ MATCH',
+        value: `${match.map ?? 'No map'}${match.game_mode ? ` · ${match.game_mode}` : ''}\n${match.format === 'best_of_3' ? 'Best of 3' : 'Best of 1'} · ${
+          match.matchmaking === 'draft' ? 'Captain Draft' : 'Auto Balanced'
         }`,
       });
+    if (match.status === 'awaiting_ready' || match.status === 'in_progress' || match.status === 'voting') {
+      embed.addFields({ name: '🔢 SERIES', value: `${match.team_a_score}–${match.team_b_score}` });
+    }
     if (match.status === 'confirmed') {
-      embed.addFields({ name: 'RESULT', value: `${match.team_a_score} - ${match.team_b_score} (${match.winner === 'A' ? 'Team A' : match.winner === 'B' ? 'Team B' : 'Draw'})` });
+      embed.addFields({
+        name: '🏆 RESULT',
+        value: `${match.team_a_score}–${match.team_b_score} · Winner: **${match.winner === 'A' ? 'Team A' : match.winner === 'B' ? 'Team B' : 'Draw'}**`,
+      });
+    }
+    if (match.status === 'cancelled' || match.status === 'timed_out') {
+      embed.addFields({ name: '🚫 STATUS', value: match.cancellation_reason ?? 'No reason given' });
     }
     if (match.created_at) {
-      embed.setFooter({ text: `Created ${shortTimestamp(match.created_at)}` });
+      embed.setFooter({ text: `${BRAND_NAME} · created ${shortTimestamp(match.created_at)}` });
     }
 
     return embed;

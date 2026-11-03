@@ -12,6 +12,8 @@ import { AdminCommandHandler, registerAdminCommandDefinitions } from './commands
 import { AppContext } from './context';
 import { registerInteractionEvents } from './events/interactionCreate';
 
+let queueSweep: NodeJS.Timeout | null = null;
+
 async function main(): Promise<void> {
   const settings = loadSettings();
   if (!settings.discordToken) {
@@ -87,10 +89,18 @@ async function main(): Promise<void> {
     ctx.timers.startSweep();
     // Refresh the persistent queue panel if one was stored.
     await ctx.queue.reconcilePanel().catch((e) => console.error('Panel reconcile failed:', e));
+    // Periodic housekeeping: evict players who waited too long with no match.
+    if (!queueSweep) {
+      queueSweep = setInterval(() => {
+        void ctx.queue.sweepStale().catch((e) => console.error('Queue sweep failed:', e));
+      }, 30_000);
+      queueSweep.unref();
+    }
   });
 
   process.on('SIGINT', () => {
     ctx.timers.stop();
+    if (queueSweep) clearInterval(queueSweep);
     db.db.close();
     process.exit(0);
   });
