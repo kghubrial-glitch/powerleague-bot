@@ -93,6 +93,18 @@ npm start        # runs the TypeScript entry directly — no build step needed
 The first run registers all slash commands for the configured guild and
 creates the SQLite database file (`./data/scrims.db`).
 
+### Hosting panel run command
+
+The bot runs straight from the TypeScript source, so the panel needs no build
+step and no compiled `dist/`. Use this run command:
+
+```bash
+if [[ -d .git ]] && [[ 1 == "1" ]]; then git pull origin main 2>/dev/null || { git fetch origin main && git reset --hard origin/main; }; fi; if [[ ! -z "$NODE_PACKAGES" ]]; then /usr/local/bin/npm install $NODE_PACKAGES; fi; if [[ ! -z "$UNNODE_PACKAGES" ]]; then /usr/local/bin/npm uninstall $UNNODE_PACKAGES; fi; if [ -f /home/container/package.json ]; then /usr/local/bin/npm install; fi; cd /home/container && /usr/local/bin/npm start
+```
+
+`config.json` and `data/` are gitignored, so every restart pulls the latest
+code without ever overwriting your bot token or the SQLite database.
+
 ### Create the panel
 
 1. Create a public channel for the queue.
