@@ -119,7 +119,10 @@ export class InteractionHandler {
 
   private async handleQueueProfile(interaction: ButtonInteraction): Promise<void> {
     const user = this.ctx.db.repos.users.ensureUser(interaction.user.id, interaction.user.username);
-    await interaction.reply({ embeds: [profileEmbed(user, this.ctx.settings)], flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      embeds: [profileEmbed(user, this.ctx.settings, this.ctx.db.repos.mapStats.forPlayer(user.discord_id))],
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   private async handleQueueLeaderboard(interaction: ButtonInteraction): Promise<void> {

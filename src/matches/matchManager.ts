@@ -644,6 +644,7 @@ export class MatchManager {
         this.applyEloToTeam(teamA, matchId, outcomeA, changes.teamAChange, now, rankChanges);
         const outcomeB: 'win' | 'loss' | 'draw' = outcomeA === 'win' ? 'loss' : outcomeA === 'loss' ? 'win' : 'draw';
         this.applyEloToTeam(teamB, matchId, outcomeB, changes.teamBChange, now, rankChanges);
+        this.recordMapStats(teamA, teamB, match.map, outcomeA);
         this.ctx.db.repos.matches.confirmResult(matchId, winner, scoreA, scoreB);
       });
 
@@ -662,6 +663,18 @@ export class MatchManager {
       .filter((v): v is number => v !== undefined);
     if (counts.length === 0) return 0;
     return counts.reduce((a, b) => a + b, 0) / counts.length;
+  }
+
+  private recordMapStats(
+    teamA: string[],
+    teamB: string[],
+    map: string | null | undefined,
+    outcomeA: 'win' | 'loss' | 'draw'
+  ): void {
+    if (!map) return;
+    for (const id of teamA) this.ctx.db.repos.mapStats.record(id, map, outcomeA);
+    const outcomeB: 'win' | 'loss' | 'draw' = outcomeA === 'win' ? 'loss' : outcomeA === 'loss' ? 'win' : 'draw';
+    for (const id of teamB) this.ctx.db.repos.mapStats.record(id, map, outcomeB);
   }
 
   private applyEloToTeam(

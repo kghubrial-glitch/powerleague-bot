@@ -10,6 +10,7 @@ import { CooldownRepository } from './cooldownRepository';
 import { PanelRepository } from './panelRepository';
 import { DraftRepository } from './draftRepository';
 import { SettingsRepository } from './settingsRepository';
+import { MapStatsRepository } from './mapStatsRepository';
 
 export class Repositories {
   users: UserRepository;
@@ -23,6 +24,7 @@ export class Repositories {
   panels: PanelRepository;
   drafts: DraftRepository;
   settings: SettingsRepository;
+  mapStats: MapStatsRepository;
 
   constructor(public db: ScrimDatabase) {
     this.users = new UserRepository(db);
@@ -36,6 +38,7 @@ export class Repositories {
     this.panels = new PanelRepository(db);
     this.drafts = new DraftRepository(db);
     this.settings = new SettingsRepository(db);
+    this.mapStats = new MapStatsRepository(db);
   }
 
   transaction<T>(fn: () => T): T {
@@ -54,3 +57,4 @@ export * from './cooldownRepository';
 export * from './panelRepository';
 export * from './draftRepository';
 export * from './settingsRepository';
+export * from './mapStatsRepository';

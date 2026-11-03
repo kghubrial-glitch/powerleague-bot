@@ -81,7 +81,9 @@ export class CommandHandler {
   private async profile(interaction: ChatInputCommandInteraction): Promise<void> {
     const target = interaction.options.getUser('player') ?? interaction.user;
     const user = this.ctx.db.repos.users.ensureUser(target.id, target.username);
-    await interaction.reply({ embeds: [profileEmbed(user, this.ctx.settings)] });
+    await interaction.reply({
+      embeds: [profileEmbed(user, this.ctx.settings, this.ctx.db.repos.mapStats.forPlayer(user.discord_id))],
+    });
   }
 
   private async leaderboard(interaction: ChatInputCommandInteraction): Promise<void> {

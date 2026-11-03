@@ -297,7 +297,7 @@ export function matchActionRows(actions: MatchActions): ActionRowBuilder<ButtonB
 // Player profile
 // ---------------------------------------------------------------------------
 
-export function profileEmbed(user: UserRow, settings: Settings): EmbedBuilder {
+export function profileEmbed(user: UserRow, settings: Settings, mapStats?: Array<{ map: string; wins: number; losses: number; draws: number }>): EmbedBuilder {
   const ranks = settings.ranks;
   const rank = rankForElo(user.elo, ranks);
   const division = divisionForElo(user.elo, ranks);
@@ -327,6 +327,17 @@ export function profileEmbed(user: UserRow, settings: Settings): EmbedBuilder {
   }
   if (user.last_match_at) {
     embed.addFields({ name: 'Last Match', value: relativeTimestamp(user.last_match_at), inline: true });
+  }
+  if (mapStats && mapStats.length > 0) {
+    const lines = mapStats
+      .slice(0, 5)
+      .map((s) => {
+        const total = s.wins + s.losses + s.draws;
+        const rate = total > 0 ? ((s.wins / total) * 100).toFixed(0) : '0';
+        return `${s.map}: ${s.wins}W/${s.losses}L (${rate}%)`;
+      })
+      .join('\n');
+    embed.addFields({ name: 'TOP MAPS', value: lines || 'No data', inline: false });
   }
   return embed;
 }

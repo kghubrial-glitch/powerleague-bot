@@ -38,6 +38,23 @@ describe('Repositories', () => {
     expect(repos.matches.nextMatchId()).toBe('scrim-0002');
   });
 
+  it('records per-map statistics and aggregates win rates', () => {
+    repos.users.ensureUser('1', 'Alice');
+    repos.mapStats.record('1', 'Shooting Star', 'win');
+    repos.mapStats.record('1', 'Shooting Star', 'loss');
+    repos.mapStats.record('1', 'Shooting Star', 'win');
+    repos.mapStats.record('1', 'Safe Zone', 'loss');
+
+    const stats = repos.mapStats.forPlayer('1');
+    expect(stats).toHaveLength(2);
+    const shooting = stats.find((s) => s.map === 'Shooting Star')!;
+    expect(shooting.wins).toBe(2);
+    expect(shooting.losses).toBe(1);
+    expect(repos.mapStats.winRate('1', 'Shooting Star')).toBeCloseTo(2 / 3);
+    expect(repos.mapStats.favoriteMap('1')).toBe('Shooting Star');
+    expect(repos.mapStats.winRate('1', 'Unknown Map')).toBeUndefined();
+  });
+
   it('applies Elo changes with history and peak tracking', () => {
     repos.users.ensureUser('p1', 'P1');
     const before = repos.users.getById('p1')!;
