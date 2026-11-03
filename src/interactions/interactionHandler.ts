@@ -14,7 +14,7 @@ import {
 } from 'discord.js';
 import { AppContext } from '../context';
 import { MatchRow } from '../types';
-import { leaderboardEmbed } from '../format';
+import { leaderboardEmbed, profileEmbed } from '../format';
 
 const CUSTOM_ID_SEPARATOR = ':';
 const MAX_CODE_LENGTH = 12;
@@ -40,6 +40,14 @@ export class InteractionHandler {
       if (customId === 'queue:refresh') {
         await interaction.deferUpdate();
         await this.ctx.queue.refreshPanel();
+        return;
+      }
+      if (customId === 'queue:profile') {
+        await this.handleQueueProfile(interaction);
+        return;
+      }
+      if (customId === 'queue:leaderboard') {
+        await this.handleQueueLeaderboard(interaction);
         return;
       }
       if (customId.startsWith('vote:')) {
@@ -107,6 +115,21 @@ export class InteractionHandler {
       flags: MessageFlags.Ephemeral,
     });
     await this.ctx.queue.refreshPanel().catch(() => {});
+  }
+
+  private async handleQueueProfile(interaction: ButtonInteraction): Promise<void> {
+    const user = this.ctx.db.repos.users.ensureUser(interaction.user.id, interaction.user.username);
+    await interaction.reply({ embeds: [profileEmbed(user, this.ctx.settings)], flags: MessageFlags.Ephemeral });
+  }
+
+  private async handleQueueLeaderboard(interaction: ButtonInteraction): Promise<void> {
+    const minMatches = this.ctx.settings.leaderboardMinMatches;
+    const rows = this.ctx.db.repos.users.leaderboard(10, 0, minMatches);
+    const total = this.ctx.db.repos.users.countLeaderboard(minMatches);
+    await interaction.reply({
+      embeds: [leaderboardEmbed(rows, 0, total, 0, 1, this.ctx.settings)],
+      flags: MessageFlags.Ephemeral,
+    });
   }
 
   // -------------------------------------------------------------------------

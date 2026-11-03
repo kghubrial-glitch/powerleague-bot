@@ -1,30 +1,31 @@
 import { ScrimDatabase } from '../connection';
 import { MapRow } from '../../types';
 
-const DEFAULT_MAPS = [
-  'Hard Rock Mine',
-  'Crystal Arcade',
-  'Deathcap Trap',
-  'Kaboom Canyon',
-  'Safe Zone',
-  'Hot Potato',
-  'Bridge Too Far',
-  'Shooting Star',
-  'Hideout',
-  'Dry Season',
-  'Belles Rock',
-  'Out in the Open',
-  'Flaring Phoenix',
-  'New Horizon',
+/** Official map pool with correct Brawl Stars game-mode associations. */
+export const DEFAULT_MAPS: Array<{ name: string; gameMode: string }> = [
+  { name: 'Hard Rock Mine', gameMode: 'Gem Grab' },
+  { name: 'Crystal Arcade', gameMode: 'Gem Grab' },
+  { name: 'Deathcap Trap', gameMode: 'Gem Grab' },
+  { name: 'Kaboom Canyon', gameMode: 'Heist' },
+  { name: 'Safe Zone', gameMode: 'Heist' },
+  { name: 'Hot Potato', gameMode: 'Heist' },
+  { name: 'Bridge Too Far', gameMode: 'Heist' },
+  { name: 'Shooting Star', gameMode: 'Bounty' },
+  { name: 'Hideout', gameMode: 'Bounty' },
+  { name: 'Dry Season', gameMode: 'Bounty' },
+  { name: "Belle's Rock", gameMode: 'Knockout' },
+  { name: 'Out in the Open', gameMode: 'Knockout' },
+  { name: 'Flaring Phoenix', gameMode: 'Knockout' },
+  { name: 'New Horizons', gameMode: 'Knockout' },
 ];
 
 export class MapRepository {
   constructor(private db: ScrimDatabase) {}
 
   ensureDefaults(): void {
-    const insert = this.db.prepare('INSERT OR IGNORE INTO maps (name) VALUES (?)');
-    for (const name of DEFAULT_MAPS) {
-      insert.run(name);
+    const insert = this.db.prepare('INSERT OR IGNORE INTO maps (name, game_mode) VALUES (?, ?)');
+    for (const map of DEFAULT_MAPS) {
+      insert.run(map.name, map.gameMode);
     }
   }
 

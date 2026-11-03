@@ -104,6 +104,7 @@ export interface Settings {
   maxElo: number | undefined;
   teamBalanceTolerance: number;
   matchFormat: MatchFormat;
+  matchmakingMode: 'auto' | 'draft';
   mapRotationMode: 'unique' | 'random';
   timers: {
     teamCode: number;
@@ -140,6 +141,7 @@ export function loadSettings(env?: NodeJS.ProcessEnv): Settings {
     maxElo: optionalStr('MAX_ELO', merged) !== undefined ? optionalInt('MAX_ELO', 10000, merged) : undefined,
     teamBalanceTolerance: optionalInt('TEAM_BALANCE_TOLERANCE', 40, merged),
     matchFormat,
+    matchmakingMode: optionalStr('MATCHMAKING_MODE', merged) === 'draft' ? 'draft' : 'auto',
     mapRotationMode: optionalStr('MAP_ROTATION_MODE', merged) === 'random' ? 'random' : 'unique',
     timers: {
       teamCode: optionalInt('TIMER_TEAMCODE', 300, merged),

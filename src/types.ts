@@ -11,6 +11,10 @@ export interface UserRow {
   best_streak: number;
   created_at: string;
   last_match_at: string | null;
+  season_wins?: number;
+  season_losses?: number;
+  season_draws?: number;
+  season_peak_elo?: number;
 }
 
 export interface QueueEntryRow {
@@ -56,6 +60,14 @@ export interface MatchRow {
   cancelled_at: string | null;
   created_at: string;
   updated_at: string;
+  matchmaking?: string; // 'auto' | 'draft'
+  captain_a?: string | null;
+  captain_b?: string | null;
+  draft_order?: string | null; // JSON array of 'A'|'B' turns
+  log_message_id?: string | null;
+  log_channel_id?: string | null;
+  mvp?: string | null;
+  season_id?: string | null;
 }
 
 export type VoteChoice = 'A' | 'B' | 'draw';
