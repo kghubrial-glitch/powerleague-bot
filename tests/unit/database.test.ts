@@ -77,8 +77,8 @@ describe('Repositories', () => {
 
   it('creates default user profile on first access', () => {
     const user = repos.users.ensureUser('123', 'Alice');
-    expect(user.elo).toBe(1000);
-    expect(user.peak_elo).toBe(1000);
+    expect(user.elo).toBe(0);
+    expect(user.peak_elo).toBe(0);
     expect(user.total_matches).toBe(0);
     // second call is idempotent
     const again = repos.users.ensureUser('123', 'Alice');
@@ -112,8 +112,8 @@ describe('Repositories', () => {
     const before = repos.users.getById('p1')!;
     repos.users.applyEloChange('p1', 'scrim-0001', before.elo, 24, 'win', new Date().toISOString());
     const after = repos.users.getById('p1')!;
-    expect(after.elo).toBe(1024);
-    expect(after.peak_elo).toBe(1024);
+    expect(after.elo).toBe(24);
+    expect(after.peak_elo).toBe(24);
     expect(after.wins).toBe(1);
     expect(after.total_matches).toBe(1);
     expect(repos.users.getEloHistory('p1', 10, 0)).toHaveLength(1);
@@ -121,30 +121,30 @@ describe('Repositories', () => {
 
   it('keeps peak_elo through a loss', () => {
     repos.users.ensureUser('p1', 'P1');
-    repos.users.applyEloChange('p1', 'm1', 1000, 40, 'win', new Date().toISOString());
+    repos.users.applyEloChange('p1', 'm1', 0, 40, 'win', new Date().toISOString());
     // force a loss from current ELO
     const cur = repos.users.getById('p1')!;
     repos.users.applyEloChange('p1', 'm2', cur.elo, -20, 'loss', new Date().toISOString());
     const final = repos.users.getById('p1')!;
-    expect(final.elo).toBe(1020);
-    expect(final.peak_elo).toBe(1040);
+    expect(final.elo).toBe(20);
+    expect(final.peak_elo).toBe(40);
   });
 
   it('tracks signed win/loss streaks', () => {
     repos.users.ensureUser('p1', 'P1');
-    repos.users.applyEloChange('p1', 'm1', 1000, 10, 'win', 't1');
+    repos.users.applyEloChange('p1', 'm1', 0, 10, 'win', 't1');
     expect(repos.users.getById('p1')!.current_streak).toBe(1);
-    repos.users.applyEloChange('p1', 'm2', 1010, 10, 'win', 't2');
+    repos.users.applyEloChange('p1', 'm2', 10, 10, 'win', 't2');
     expect(repos.users.getById('p1')!.current_streak).toBe(2);
     expect(repos.users.getById('p1')!.best_streak).toBe(2);
     // a loss resets the win streak and starts a loss streak
-    repos.users.applyEloChange('p1', 'm3', 1020, -5, 'loss', 't3');
+    repos.users.applyEloChange('p1', 'm3', 20, -5, 'loss', 't3');
     expect(repos.users.getById('p1')!.current_streak).toBe(-1);
     // consecutive losses continue the losing streak
-    repos.users.applyEloChange('p1', 'm4', 1015, -5, 'loss', 't4');
+    repos.users.applyEloChange('p1', 'm4', 15, -5, 'loss', 't4');
     expect(repos.users.getById('p1')!.current_streak).toBe(-2);
     // a draw resets the streak
-    repos.users.applyEloChange('p1', 'm5', 1010, 0, 'draw', 't5');
+    repos.users.applyEloChange('p1', 'm5', 10, 0, 'draw', 't5');
     expect(repos.users.getById('p1')!.current_streak).toBe(0);
   });
 

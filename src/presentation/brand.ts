@@ -12,25 +12,4 @@ export const BRAND_SHORT = 'SvM';
 export const BRAND_FOOTER = `${BRAND_NAME} · Brawl Stars 3v3`;
 
 /** How a scrim match panel/channel is labelled in lists. */
-export const CATEGORY_NAME = '⚔️ SvM · Power League';
-
-export const EMOJI = {
-  join: '✅',
-  leave: '🚪',
-  refresh: '🔄',
-  profile: '👤',
-  leaderboard: '🏆',
-  queue: '🎮',
-  teamcode: '🔑',
-  ready: '🟢',
-  finished: '🏁',
-  cancel: '🚫',
-  report: '📋',
-  vote: '🗳️',
-  approved: '✔️',
-  forbidden: '⛔',
-  waiting: '⚪',
-  map: '🗺️',
-  trophy: '🏅',
-  arrow: '➜',
-} as const;
+export const CATEGORY_NAME = 'SvM · Power League';

@@ -53,8 +53,8 @@ describe('UserRepository.resetElo', () => {
 
     expect(repos.users.resetElo('a')).toBe(true);
     const user = repos.users.getById('a')!;
-    expect(user.elo).toBe(1000);
-    expect(user.peak_elo).toBe(1000);
+    expect(user.elo).toBe(0);
+    expect(user.peak_elo).toBe(0);
   });
 
   it('returns false for an unknown player', () => {
@@ -63,7 +63,7 @@ describe('UserRepository.resetElo', () => {
 });
 
 describe('UserRepository.resetAllElo', () => {
-  it('resets every player to 1000', () => {
+  it('resets every player to 0', () => {
     repos.users.ensureUser('a', 'Alpha');
     repos.users.ensureUser('b', 'Bravo');
     repos.users.applyEloChange('a', 'scrim-0001', 1000, 150, 'win', new Date().toISOString());
@@ -71,9 +71,9 @@ describe('UserRepository.resetAllElo', () => {
 
     const count = repos.users.resetAllElo();
     expect(count).toBe(2);
-    expect(repos.users.getById('a')!.elo).toBe(1000);
-    expect(repos.users.getById('b')!.elo).toBe(1000);
-    expect(repos.users.getById('a')!.peak_elo).toBe(1000);
+    expect(repos.users.getById('a')!.elo).toBe(0);
+    expect(repos.users.getById('b')!.elo).toBe(0);
+    expect(repos.users.getById('a')!.peak_elo).toBe(0);
   });
 });
 

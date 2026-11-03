@@ -9,6 +9,7 @@ import { QueueManager } from './matchmaking/queueManager';
 import { InteractionHandler } from './interactions/interactionHandler';
 import { CommandHandler } from './commands/commands';
 import { AdminCommandHandler } from './commands/admin';
+import { PrefixHandler } from './commands/prefixHandler';
 
 /**
  * Central application context.
@@ -28,6 +29,7 @@ export interface AppContext {
   interactions: InteractionHandler;
   commands: CommandHandler;
   admin: AdminCommandHandler;
+  prefix: PrefixHandler;
 }
 
 export function getTextChannel(ctx: AppContext, channelId: string): TextChannel | null {

@@ -15,13 +15,22 @@ export function rankForElo(elo: number, ranks: RankTier[]): RankTier {
 /**
  * Which division (I, II or III) the player is in within their current rank.
  * Each band between adjacent thresholds is split into three equal parts.
+ * The top rank counts up from its own threshold using the band span of the
+ * previous rank so the whole ladder keeps showing I/II/III.
  */
 export function divisionForElo(elo: number, ranks: RankTier[]): Division {
   const current = rankForElo(elo, ranks);
   const idx = ranks.findIndex((r) => r.name === current.name);
   const next = idx >= 0 && idx < ranks.length - 1 ? ranks[idx + 1] : undefined;
-  if (!next) return 3; // top rank
-  const span = next.threshold - current.threshold;
+  let span: number;
+  if (next) {
+    span = next.threshold - current.threshold;
+  } else if (idx > 0) {
+    // Top rank: reuse the previous band so divisions keep working upwards.
+    span = current.threshold - ranks[idx - 1].threshold;
+  } else {
+    return 3;
+  }
   if (span <= 0) return 1;
   const step = span / DIVISIONS_PER_RANK;
   const offset = Math.max(0, elo - current.threshold);
@@ -35,19 +44,14 @@ export function divisionName(division: Division): string {
   return ['I', 'II', 'III'][division - 1];
 }
 
-/** Full display label, e.g. "DIAMOND II" or "LEGENDARY" for the top rank. */
+/** Full display label, e.g. "DIAMOND II" or "MASTERS III" on the very top. */
 export function displayRank(elo: number, ranks: RankTier[]): string {
   const rank = rankForElo(elo, ranks);
-  const idx = ranks.findIndex((r) => r.name === rank.name);
-  const isTop = idx === ranks.length - 1;
-  if (isTop) return rank.name.toUpperCase();
   return `${rank.name.toUpperCase()} ${divisionName(divisionForElo(elo, ranks))}`;
 }
 
 /** Stable identifier for an elo -> rank+division pair (used for announcements). */
 export function rankKey(elo: number, ranks: RankTier[]): string {
   const rank = rankForElo(elo, ranks);
-  const idx = ranks.findIndex((r) => r.name === rank.name);
-  if (idx === ranks.length - 1) return `${rank.name.toUpperCase()}:3`;
-  return `${rank.name.toUpperCase()}:${divisionForElo(elo, ranks)}`;
+  return `${rank.name.toUpperCase()} ${divisionName(divisionForElo(elo, ranks))}`;
 }

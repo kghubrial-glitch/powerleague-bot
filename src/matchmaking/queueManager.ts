@@ -150,7 +150,7 @@ export class QueueManager {
     if (!channel) return;
     await channel
       .send({
-        content: `⏳ ${message}\nYou can rejoin anytime with the **Join Queue** button.`,
+        content: `${message}\nYou can rejoin anytime with the **Join Queue** button or \`!join\`.`,
         allowedMentions: { parse: [] },
       })
       .catch(() => {});

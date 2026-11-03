@@ -10,40 +10,43 @@ import { RankTier } from '../../src/config/settings';
 
 const RANKS: RankTier[] = [
   { name: 'Bronze', threshold: 0 },
-  { name: 'Silver', threshold: 900 },
-  { name: 'Gold', threshold: 1100 },
-  { name: 'Diamond', threshold: 1300 },
-  { name: 'Mythic', threshold: 1500 },
-  { name: 'Legendary', threshold: 1800 },
+  { name: 'Silver', threshold: 2100 },
+  { name: 'Gold', threshold: 4300 },
+  { name: 'Diamond', threshold: 6500 },
+  { name: 'Mythic', threshold: 8700 },
+  { name: 'Legendary', threshold: 10900 },
+  { name: 'Masters', threshold: 13000 },
 ];
 
 describe('rankManager', () => {
   it('finds the correct rank tier', () => {
     expect(rankForElo(500, RANKS).name).toBe('Bronze');
-    expect(rankForElo(950, RANKS).name).toBe('Silver');
-    expect(rankForElo(2000, RANKS).name).toBe('Legendary');
+    expect(rankForElo(5000, RANKS).name).toBe('Gold');
+    expect(rankForElo(12000, RANKS).name).toBe('Legendary');
+    expect(rankForElo(15000, RANKS).name).toBe('Masters');
   });
 
   it('splits rank bands into three divisions', () => {
-    // Silver spans 200 elo (900->1100), step ~66.6
-    expect(divisionForElo(910, RANKS)).toBe(1);
-    expect(divisionForElo(990, RANKS)).toBe(2);
-    expect(divisionForElo(1090, RANKS)).toBe(3);
+    // Silver spans 2200 elo (2100->4300), step ~733
+    expect(divisionForElo(2200, RANKS)).toBe(1);
+    expect(divisionForElo(3300, RANKS)).toBe(2);
+    expect(divisionForElo(4200, RANKS)).toBe(3);
   });
 
   it('uses the top division for the highest rank', () => {
-    expect(divisionForElo(2500, RANKS)).toBe(3);
+    expect(divisionForElo(14500, RANKS)).toBe(3);
   });
 
-  it('formats the full display label', () => {
-    expect(displayRank(990, RANKS)).toBe('SILVER II');
-    expect(displayRank(2500, RANKS)).toBe('LEGENDARY');
+  it('formats the full display label with I/II/III divisions everywhere', () => {
+    expect(displayRank(500, RANKS)).toBe('BRONZE I');
+    expect(displayRank(3300, RANKS)).toBe('SILVER II');
+    expect(displayRank(14500, RANKS)).toBe('MASTERS III');
   });
 
   it('produces distinct stable keys across divisions', () => {
-    expect(rankKey(910, RANKS)).not.toBe(rankKey(990, RANKS));
-    expect(rankKey(1400, RANKS)).toBe('DIAMOND:2');
-    expect(rankKey(2500, RANKS)).toBe('LEGENDARY:3');
+    expect(rankKey(2200, RANKS)).not.toBe(rankKey(3300, RANKS));
+    expect(rankKey(7500, RANKS)).toBe('DIAMOND II');
+    expect(rankKey(14500, RANKS)).toBe('MASTERS III');
   });
 
   it('handles an empty rank list defensively', () => {

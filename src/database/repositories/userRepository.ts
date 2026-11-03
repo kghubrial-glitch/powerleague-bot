@@ -8,8 +8,8 @@ export class UserRepository {
     return this.db.prepare('SELECT * FROM users WHERE discord_id = ?').get(discordId) as UserRow | undefined;
   }
 
-  /** Resets every registered player's Elo to the starting value. Returns the count reset. */
-  resetAllElo(resetTo = 1000): number {
+  /** Resets every registered player's Elo to the starting value (0). Returns the count reset. */
+  resetAllElo(resetTo = 0): number {
     const users = this.listAll();
     const tx = this.db.transaction(() => {
       for (const u of users) {
@@ -38,7 +38,7 @@ export class UserRepository {
       }
       return existing;
     }
-    const elo = 1000;
+    const elo = 0;
     this.db
       .prepare(
         `INSERT INTO users (discord_id, username, elo, peak_elo)
@@ -126,11 +126,11 @@ export class UserRepository {
   }
 
   /**
-   * Resets a player's Elo rating to the starting value (default 1000), also
-   * resetting peak Elo so the profile reflects the fresh rating. Other
-   * statistics (wins/losses/matches) are preserved — only the rating resets.
+   * Resets a player's Elo rating to the starting value (0), also resetting
+   * peak Elo so the profile reflects the fresh rating. Other statistics
+   * (wins/losses/matches) are preserved — only the rating resets.
    */
-  resetElo(discordId: string, resetTo = 1000): boolean {
+  resetElo(discordId: string, resetTo = 0): boolean {
     const existing = this.getById(discordId);
     if (!existing) return false;
     this.db

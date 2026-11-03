@@ -14,18 +14,20 @@ results update Elo, profiles, streaks and the leaderboard.
 ## Features
 
 - **Persistent matchmaking panel** — permanent SvM-branded embed with
-  Join/Leave/Refresh buttons plus quick Profile and Leaderboard buttons. Queue
-  state lives in SQLite and survives restarts. Idle players waiting too long
-  without a match (no join activity) are auto-removed via `QUEUE_INACTIVE_AFTER`
-  and notified so the queue never fills with ghosts.
+  Join/Leave buttons plus quick Profile and Leaderboard buttons. Queue state
+  lives in SQLite and survives restarts. Idle players waiting too long without
+  a match (no join activity) are auto-removed via `QUEUE_INACTIVE_AFTER` and
+  notified so the queue never fills with ghosts. The panel is **not** the only
+  way to queue — `!join` works from any server channel.
 - **Elo-balanced random teams** — evaluates all 10 unique 3v3 splits, keeps the
   balanced ones (configurable tolerance), draws one at random, and randomly
   assigns Team A / Team B.
-- **Player profiles & Elo** — starting Elo 1000, team-based Elo with
-  K=40 for the first 10 matches and K=24 after, peak tracking, win/loss/draw
-  totals, signed streaks, and configurable rank tiers. Each rank band is split
-  into three divisions (e.g. `SILVER II`) and crossing a division/rank
-  boundary announces in the match channel.
+- **Player profiles & Elo** — starting Elo 0 on a 0–15000 competitive scale,
+  team-based Elo with K=40 for the first 10 matches and K=24 after, peak
+  tracking, win/loss/draw totals, signed streaks, and configurable rank tiers
+  (Bronze I → Masters III). Each rank band is split into three divisions
+  (`SILVER II`) and crossing a division/rank boundary announces in the match
+  channel.
 - **Per-player map statistics** — confirmed matches record wins/losses/draws
   per map and the profile shows a TOP MAPS panel with map-specific win rate.
 - **Map pool** — the 14 classic Power League maps seeded by default (Gem Grab,
@@ -161,7 +163,7 @@ never has its token wiped. Values are resolved in priority order:
 | `MIN_ELO` / `MAX_ELO` | unset | Optional queue Elo range. |
 | `TEAM_BALANCE_TOLERANCE` | `40` | Max average-Elo gap vs. the best split still considered. |
 | `MATCH_FORMAT` | `best_of_3` | `best_of_3` (default) or `best_of_1`. |
-| `QUEUE_INACTIVE_AFTER` | `0` | Seconds a player can sit idle in the queue before being auto-removed (`0` = disabled). |
+| `QUEUE_INACTIVE_AFTER` | `3600` | Seconds a player can sit idle in the queue before being auto-removed (`0` = disabled). |
 | `MATCHMAKING_MODE` | `auto` | `auto` (balanced teams) or `draft` (captain draft). Runtime-togglable via `/scrim matchmaking`. |
 | `MAP_ROTATION_MODE` | `unique` | `unique` avoids recently used maps, `random` is fully random. |
 | `TIMER_TEAMCODE` | `300` | Seconds to submit a TeamCode, else the match is cancelled. |
@@ -169,7 +171,7 @@ never has its token wiped. Values are resolved in priority order:
 | `TIMER_MATCH` | `900` | Seconds to finish the series after all are ready. |
 | `TIMER_VOTE` | `900` | Seconds for result voting, else disputed. |
 | `TIMER_FAULT_REPORT` | `300` | Seconds fault reporting stays open. |
-| `RANK_BRONZE`…`RANK_LEGENDARY` | 1000…1800 | Elo thresholds. |
+| `RANK_BRONZE`…`RANK_MASTERS` | 0…13000 | Elo thresholds (Bronze I starts at 0). |
 | `LEADERBOARD_MIN_MATCHES` | `0` | Minimum matches to appear on the leaderboard. |
 
 ---
@@ -178,15 +180,20 @@ never has its token wiped. Values are resolved in priority order:
 
 ### Player commands
 
+Every player command is available both as a slash command and as a `!`-prefixed
+chat command, so the matchmaking panel is never the only way to queue up.
+
 | Command | Description |
 | --- | --- |
-| `/profile [player]` | Show a player’s profile (Elo, rank, streaks, record). |
-| `/leaderboard` | Top players by Elo, with pagination buttons. |
-| `/history [player]` | Paginated match history. |
-| `/queue` | Show the live queue panel. |
-| `/maps` | Show the map pool and recent map usage. |
-| `/match` | Show your current match channel. |
-| `/leave` | Leave the queue. |
+| `/queue` · `!queue` | Show the live queue panel. |
+| `!join` | Join the queue from chat. |
+| `/leave` · `!leave` | Leave the queue. |
+| `/profile [player]` · `!profile [player]` | Show a player’s profile (Elo, rank, streaks, record). |
+| `/leaderboard` · `!leaderboard` | Top players by Elo, with pagination buttons. |
+| `/history [player]` · `!history [player]` | Paginated match history. |
+| `/maps` · `!maps` | Show the map pool and recent map usage. |
+| `/match` · `!match` | Show your current match channel. |
+| `/help` · `!help` | Show the command list and how to queue. |
 
 ### Admin commands (`/scrim …`)
 
@@ -205,10 +212,10 @@ never has its token wiped. Values are resolved in priority order:
 | `/scrim stats` | Server-wide statistics. |
 | `/scrim audit [limit]` | Recent audit log entries. |
 | `/scrim clear [reason]` | Clear the matchmaking queue (players are notified). |
-| `/scrim resetelo [player]` | Reset Elo to 1000 for one player, or every player when omitted. |
+| `/scrim resetelo [player]` | Reset Elo to 0 for one player, or every player when omitted. |
 | `/scrim ban <player> [reason]` | Ban a player from joining the queue. |
 | `/scrim unban <player>` | Remove a queue ban / cooldown. |
-| `/clear` | Shortcut: reset every player's Elo to 1000 (irreversible). |
+| `/clear` | Shortcut: reset every player's Elo to 0 (irreversible). |
 
 All admin commands require the configured `STAFF_ROLE_ID` or
 `Administrator` permission.
@@ -220,11 +227,11 @@ everyone, but gated when pressed):
 
 | Button | Action |
 | --- | --- |
-| `🧹 Clear Queue` | Removes every player from the queue and notifies them. |
-| `🔨 Ban from Queue` | Opens a modal to permanently ban a player (by Discord ID) from queueing. |
-| `⚖️ Reset all Elo` | Resets every player to 1000 Elo after a confirmation prompt. |
+| `Clear Queue` | Removes every player from the queue and notifies them. |
+| `Ban from Queue` | Opens a modal to permanently ban a player (by Discord ID) from queueing. |
 
-All staff panel actions are written to the audit log.
+Elo resets are only available through the `/scrim resetelo` command. All staff
+panel actions are written to the audit log.
 
 ---
 

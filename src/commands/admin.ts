@@ -154,7 +154,7 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
   scrim.addSubcommand((s) =>
     s
       .setName('resetelo')
-      .setDescription('Reset Elo for every player (or a single player) to 1000.')
+      .setDescription('Reset Elo for every player (or a single player) to 0.')
       .addUserOption((o) => o.setName('player').setDescription('A specific player to reset (defaults to everyone).').setRequired(false))
   );
   scrim.addSubcommand((s) =>
@@ -171,10 +171,10 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
       .addUserOption((o) => o.setName('player').setDescription('Player to unban.').setRequired(true))
   );
 
-  // Top-level staff shortcut: wipe every player's Elo back to 1000.
+  // Top-level staff shortcut: wipe every player's Elo back to 0.
   const clear = new SlashCommandBuilder()
     .setName('clear')
-    .setDescription('Reset every player’s Elo to 1000 (staff, irreversible).');
+    .setDescription('Reset every player’s Elo to 0 (staff, irreversible).');
 
   return [scrim.toJSON(), clear.toJSON()];
 }
@@ -263,7 +263,7 @@ export class AdminCommandHandler {
         components: queueActionRows(),
       });
       this.ctx.db.repos.panels.set(channel.id, message.id);
-      await interaction.editReply({ content: '✅ Matchmaking panel created here. Players can now join the queue.' });
+      await interaction.editReply({ content: 'Matchmaking panel created here. Players can now join the queue.' });
       this.ctx.db.repos.audits.log({
         action: 'panel_created',
         administrator_id: interaction.user.id,
@@ -281,7 +281,7 @@ export class AdminCommandHandler {
     const matchId = interaction.options.getString('match_id', true);
     const reason = interaction.options.getString('reason') ?? 'Cancelled by an administrator';
     const ok = await this.ctx.matches.cancelMatch(matchId, reason, 'cancelled', interaction.user.id);
-    await interaction.reply({ content: ok ? `🚫 Match **${matchId}** cancelled.` : `Could not cancel **${matchId}** — not found or already ended.`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: ok ? `Match **${matchId}** cancelled.` : `Could not cancel **${matchId}** — not found or already ended.`, flags: MessageFlags.Ephemeral });
   }
 
   private async result(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -291,7 +291,7 @@ export class AdminCommandHandler {
     const scoreA = interaction.options.getInteger('score_a') ?? undefined;
     const scoreB = interaction.options.getInteger('score_b') ?? undefined;
     const result = await this.ctx.matches.adminResolve(matchId, winner, interaction.user.id, scoreA, scoreB);
-    await interaction.reply({ content: result.ok ? `🏆 Match **${matchId}** resolved — winner: **${winner.toUpperCase()}**. Elo updated.` : result.error, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: result.ok ? `Match **${matchId}** resolved — winner: **${winner.toUpperCase()}**. Elo updated.` : result.error, flags: MessageFlags.Ephemeral });
   }
 
   private async eloAdjust(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -302,7 +302,7 @@ export class AdminCommandHandler {
     this.ctx.db.repos.users.applyEloChange(user.discord_id, 'admin-adjust', user.elo, amount, amount >= 0 ? 'win' : 'loss', now);
     const updated = this.ctx.db.repos.users.getById(user.discord_id)!;
     await interaction.reply({
-      content: `📈 Adjusted **${target.username}**: ${amount >= 0 ? '+' : ''}${amount} Elo → **${updated.elo}** (peak ${updated.peak_elo}). Logged for audit.`,
+      content: `Adjusted **${target.username}**: ${amount >= 0 ? '+' : ''}${amount} Elo → **${updated.elo}** (peak ${updated.peak_elo}). Logged for audit.`,
       flags: MessageFlags.Ephemeral,
     });
     this.ctx.db.repos.audits.log({
@@ -370,7 +370,7 @@ export class AdminCommandHandler {
     const reason = interaction.options.getString('reason') ?? 'Set by an administrator';
     const until = new Date(Date.now() + minutes * 60_000).toISOString();
     this.ctx.db.repos.cooldowns.set(target.id, until, reason, interaction.user.id);
-    await interaction.reply({ content: `⛔ **${target.username}** is now on a matchmaking cooldown for **${minutes}** minutes.`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: `**${target.username}** is now on a matchmaking cooldown for **${minutes}** minutes.`, flags: MessageFlags.Ephemeral });
     this.ctx.db.repos.audits.log({
       action: 'cooldown_applied',
       administrator_id: interaction.user.id,
@@ -389,7 +389,7 @@ export class AdminCommandHandler {
     const inQueue = this.ctx.db.repos.queue.count();
 
     const embed = new EmbedBuilder()
-      .setTitle(`📊 ${BRAND_NAME} · Server statistics`)
+      .setTitle(`${BRAND_NAME} · Server statistics`)
       .setColor(0x2ecc71)
       .addFields(
         { name: 'Registered players', value: `${total}`, inline: true },
@@ -483,8 +483,8 @@ export class AdminCommandHandler {
     const removed = await this.ctx.queue.clearQueue(reason);
     await interaction.reply({
       content: removed > 0
-        ? `🧹 Cleared the queue — **${removed}** player${removed === 1 ? ' was' : 's were'} removed. They were notified.`
-        : '🧹 The queue is already empty.',
+        ? `Cleared the queue — **${removed}** player${removed === 1 ? ' was' : 's were'} removed. They were notified.`
+        : 'The queue is already empty.',
       flags: MessageFlags.Ephemeral,
     });
     this.ctx.db.repos.audits.log({
@@ -504,7 +504,7 @@ export class AdminCommandHandler {
         return;
       }
       await interaction.reply({
-        content: `⚖️ Reset **${target.username}** Elo: **${wasElo} → 1000** (peak reset too).`,
+        content: `Reset **${target.username}** Elo: **${wasElo} → 0** (peak reset too).`,
         flags: MessageFlags.Ephemeral,
       });
       this.ctx.db.repos.audits.log({
@@ -516,7 +516,7 @@ export class AdminCommandHandler {
     } else {
       const reset = this.ctx.db.repos.users.resetAllElo();
       await interaction.reply({
-        content: `⚖️ Reset **all ${reset}** player${reset === 1 ? '' : 's'} to **1000 Elo** (peak reset too).`,
+        content: `Reset **all ${reset}** player${reset === 1 ? '' : 's'} to **0 Elo** (peak reset too).`,
         flags: MessageFlags.Ephemeral,
       });
       this.ctx.db.repos.audits.log({
@@ -537,7 +537,7 @@ export class AdminCommandHandler {
       return;
     }
     await interaction.reply({
-      content: `🔨 Banned **${target.username}** from the queue.${reason ? ` Reason: ${reason}` : ''}\nRemove with \`/scrim unban\`.`,
+      content: `Banned **${target.username}** from the queue.${reason ? ` Reason: ${reason}` : ''}\nRemove with \`/scrim unban\`.`,
       flags: MessageFlags.Ephemeral,
     });
     this.ctx.db.repos.audits.log({
@@ -552,7 +552,7 @@ export class AdminCommandHandler {
     const target = interaction.options.getUser('player', true);
     const result = await this.ctx.queue.unbanFromQueue(target.id, interaction.user.id);
     await interaction.reply({
-      content: result.ok ? `✅ **${target.username}** can now join the queue again.` : result.error ?? 'Could not unban.',
+      content: result.ok ? `**${target.username}** can now join the queue again.` : result.error ?? 'Could not unban.',
       flags: MessageFlags.Ephemeral,
     });
     if (result.ok) {

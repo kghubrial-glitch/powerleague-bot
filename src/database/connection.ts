@@ -260,8 +260,8 @@ export function migrate(db: ScrimDatabase): void {
     CREATE TABLE IF NOT EXISTS users (
       discord_id      TEXT PRIMARY KEY,
       username        TEXT NOT NULL,
-      elo             INTEGER NOT NULL DEFAULT 1000,
-      peak_elo        INTEGER NOT NULL DEFAULT 1000,
+      elo             INTEGER NOT NULL DEFAULT 0,
+      peak_elo        INTEGER NOT NULL DEFAULT 0,
       wins            INTEGER NOT NULL DEFAULT 0,
       losses          INTEGER NOT NULL DEFAULT 0,
       draws           INTEGER NOT NULL DEFAULT 0,

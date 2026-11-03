@@ -81,6 +81,9 @@ describe('settings', () => {
     expect(settings.teamBalanceTolerance).toBe(40);
     expect(settings.timers.teamCode).toBe(300);
     expect(settings.timers.match).toBe(900);
-    expect(settings.ranks.length).toBe(6);
+    expect(settings.queueInactiveAfter).toBe(3600);
+    expect(settings.ranks.length).toBe(7);
+    expect(settings.ranks[0].threshold).toBe(0);
+    expect(settings.ranks[6].name).toBe('Masters');
   });
 });

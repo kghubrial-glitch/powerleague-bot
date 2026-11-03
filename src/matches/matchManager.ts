@@ -18,7 +18,7 @@ import { computeTeamEloChanges } from '../elo/eloCalculator';
 import { rankForElo, rankKey, displayRank } from '../elo/rankManager';
 import { buildMatchEmbed, matchActionRows, winnerLabel, matchChannelName, prettyMatchId } from '../format';
 import { EMBED_COLORS } from '../presentation/embeds';
-import { CATEGORY_NAME, BRAND_NAME, BRAND_SHORT, EMOJI } from '../presentation/brand';
+import { CATEGORY_NAME, BRAND_NAME, BRAND_SHORT } from '../presentation/brand';
 import { evaluateVotes, VoteRecord } from './resultVoting';
 import { shouldEscalateDodge, FAULT_VOTE_REQUIRED } from './faultDecision';
 import { NO_REPORTED_PLAYER } from '../database/repositories/faultRepository';
@@ -241,7 +241,7 @@ export class MatchManager {
     for (const p of picks) (p.turn === 'A' ? teamA : teamB).push(p.picked_id);
 
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.leaderboard} ${BRAND_SHORT} · Captain Draft · ${prettyMatchId(matchId).toUpperCase()}`)
+      .setTitle(`${BRAND_SHORT} · Captain Draft · ${prettyMatchId(matchId).toUpperCase()}`)
       .setColor(0x5865f2)
       .setDescription(
         draft.status === 'completed'
@@ -253,8 +253,8 @@ export class MatchManager {
       members.map((id) => `<@${id}>${id === captain ? ' · captain' : ''}`).join('\n') || '...';
 
     embed.addFields(
-      { name: `🅰️ TEAM A`, value: formatTeam(draft.captain_a, teamA), inline: true },
-      { name: `🅱️ TEAM B`, value: formatTeam(draft.captain_b, teamB), inline: true }
+      { name: `TEAM A`, value: formatTeam(draft.captain_a, teamA), inline: true },
+      { name: `TEAM B`, value: formatTeam(draft.captain_b, teamB), inline: true }
     );
     embed.addFields({
       name: 'Players left to pick',
@@ -262,7 +262,7 @@ export class MatchManager {
       inline: false,
     });
     if (match.map) {
-      embed.addFields({ name: `🗺️ Map`, value: `${match.map}${match.game_mode ? ` · ${match.game_mode}` : ''}`, inline: false });
+      embed.addFields({ name: `Map`, value: `${match.map}${match.game_mode ? ` · ${match.game_mode}` : ''}`, inline: false });
     }
     embed.setFooter({ text: BRAND_NAME });
     return embed;
@@ -388,7 +388,7 @@ export class MatchManager {
     const elos = ids
       .map((id) => this.ctx.db.repos.users.getById(id)?.elo)
       .filter((v): v is number => v !== undefined);
-    if (elos.length === 0) return 1000;
+    if (elos.length === 0) return 0;
     return elos.reduce((a, b) => a + b, 0) / elos.length;
   }
 
@@ -468,7 +468,7 @@ export class MatchManager {
 
     const submitter = this.submitterName(match);
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.teamcode} ${BRAND_SHORT} · TeamCode submitted · ${prettyMatchId(matchId).toUpperCase()}`)
+      .setTitle(`${BRAND_SHORT} · TeamCode submitted · ${prettyMatchId(matchId).toUpperCase()}`)
       .setColor(0x57f287)
       .setDescription(
         `Code: \`${match.team_code}\`\n\nAll players, join the in-game team with the code above, then press **Ready**.\nSubmitted by: **${submitter}**`
@@ -478,8 +478,7 @@ export class MatchManager {
     const copyCode = new ButtonBuilder()
       .setCustomId(`match:copycode:${matchId}`)
       .setLabel('View code')
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji('👁️');
+      .setStyle(ButtonStyle.Secondary);
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(copyCode);
 
     await channel.send({ embeds: [embed], components: [row] });
@@ -533,7 +532,7 @@ export class MatchManager {
       this.scheduleMatchDeadline(matchId);
       await this.notify(
         matchId,
-        `🎮 All **${participants.length}** players are ready — the match is **live**! Good luck!\n` +
+        `All **${participants.length}** players are ready — the match is **live**! Good luck!\n` +
           `${match.format === 'best_of_3' ? 'First team to win **2 games** takes the series.' : 'Single game — win it!'}`
       );
       await this.refreshMatchMessage(matchId);
@@ -570,16 +569,16 @@ export class MatchManager {
     if (!channel || !(channel instanceof TextChannel)) return;
 
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.vote} ${BRAND_SHORT} · Result vote · ${prettyMatchId(matchId).toUpperCase()}`)
+      .setTitle(`${BRAND_SHORT} · Result vote · ${prettyMatchId(matchId).toUpperCase()}`)
       .setColor(0xfee75c)
       .setDescription(
         `The match has ended. Vote below — choices are **private** until everyone votes.\n\n` +
           `**Rule:** a result needs **${REQUIRED_VOTE_COUNT} of 6** votes for the same outcome, **from both teams**.`
       );
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`vote:A:${matchId}`).setLabel('Team A won').setStyle(ButtonStyle.Success).setEmoji('🅰️'),
-      new ButtonBuilder().setCustomId(`vote:B:${matchId}`).setLabel('Team B won').setStyle(ButtonStyle.Danger).setEmoji('🅱️'),
-      new ButtonBuilder().setCustomId(`vote:draw:${matchId}`).setLabel('Draw').setStyle(ButtonStyle.Secondary).setEmoji('🤝')
+      new ButtonBuilder().setCustomId(`vote:A:${matchId}`).setLabel('Team A won').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(`vote:B:${matchId}`).setLabel('Team B won').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`vote:draw:${matchId}`).setLabel('Draw').setStyle(ButtonStyle.Secondary)
     );
     await channel.send({ embeds: [embed], components: [row] });
   }
@@ -724,7 +723,7 @@ export class MatchManager {
     if (!channel || !(channel instanceof TextChannel)) return;
     const changedLines = rankChanges.map((c) => `${c.tag}: **${c.before}** → **${c.after}**`);
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.trophy} ${BRAND_SHORT} · Result confirmed · ${prettyMatchId(matchId).toUpperCase()}`)
+      .setTitle(`${BRAND_SHORT} · Result confirmed · ${prettyMatchId(matchId).toUpperCase()}`)
       .setColor(EMBED_COLORS.success)
       .setDescription(
         `Winner: **${winnerLabel(winner)}**\n` +
@@ -776,7 +775,7 @@ export class MatchManager {
     this.ctx.db.repos.matches.markDisputed(matchId);
     this.ctx.timers.cancelAllForMatch(matchId);
     await this.notifyStaff(
-      `🚩 Match **${prettyMatchId(matchId).toUpperCase()}** was marked **disputed**: ${reason}\n` +
+      `Match **${prettyMatchId(matchId).toUpperCase()}** was marked **disputed**: ${reason}\n` +
         'Resolve with `/scrim result` (confirm/correct) or `/scrim cancel`.'
     );
     await this.refreshMatchMessage(matchId);
@@ -815,14 +814,14 @@ export class MatchManager {
     const channel = this.ctx.client.channels.cache.get(match.channel_id);
     if (!channel || !(channel instanceof TextChannel)) return;
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI.cancel} ${BRAND_SHORT} · Match cancelled · ${prettyMatchId(matchId).toUpperCase()}`)
+      .setTitle(`${BRAND_SHORT} · Match cancelled · ${prettyMatchId(matchId).toUpperCase()}`)
       .setColor(0xed4245)
       .setDescription(
         `Reason: **${reason}**\n\nWhat happened? Tell us below — each player can report once.\n` +
           `If **4 players from both teams** accuse the same player, staff is notified.`
       );
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('fault:select').setLabel('What happened?').setStyle(ButtonStyle.Secondary).setEmoji('📋')
+      new ButtonBuilder().setCustomId('fault:select').setLabel('What happened?').setStyle(ButtonStyle.Secondary)
     );
     await channel.send({ embeds: [embed], components: [row] });
     this.scheduleFaultDeadline(matchId);
@@ -922,7 +921,7 @@ export class MatchManager {
     });
 
     const embed = new EmbedBuilder()
-      .setTitle(`⚠️ ${BRAND_SHORT} · Dodge report · ${prettyMatchId(matchId).toUpperCase()}`)
+      .setTitle(`${BRAND_SHORT} · Dodge report · ${prettyMatchId(matchId).toUpperCase()}`)
       .setColor(0xed4245)
       .setDescription(
         `Reported player: **<@${reportedId}>**\nAccusations: **${count}**\n\n` +
@@ -935,7 +934,7 @@ export class MatchManager {
       await channel.send({ embeds: [embed] }).catch(() => {});
     }
     await this.notifyStaff(
-      `⚠️ **DODGE REPORT**\n\nMatch: **${prettyMatchId(matchId).toUpperCase()}**\nReported player: <@${reportedId}>\n` +
+      `**DODGE REPORT**\n\nMatch: **${prettyMatchId(matchId).toUpperCase()}**\nReported player: <@${reportedId}>\n` +
         `Accusations: ${count}\nStatus: **AWAITING MODERATOR REVIEW**\n` +
         `Resolve with \`/scrim dodge\`.`
     );
@@ -974,8 +973,8 @@ export class MatchManager {
     await this.notify(
       matchId,
       decision === 'cooldown'
-        ? `⛔ **Dodge confirmed** for <@${reportedId}> — ${durationMinutes}-minute matchmaking cooldown.`
-        : `✅ **Dodge report** for <@${reportedId}> was cleared — no action taken.`
+        ? `**Dodge confirmed** for <@${reportedId}> — ${durationMinutes}-minute matchmaking cooldown.`
+        : `**Dodge report** for <@${reportedId}> was cleared — no action taken.`
     );
   }
 
@@ -1026,7 +1025,7 @@ export class MatchManager {
           await this.cancelMatch(matchId, 'Not all players became ready in time');
           await this.notify(
             matchId,
-            `⏳ Timed out while waiting for readiness. Not ready: ${missing.map((id) => `<@${id}>`).join(', ') || 'none'}\nPlease report what happened.`
+            `Timed out while waiting for readiness. Not ready: ${missing.map((id) => `<@${id}>`).join(', ') || 'none'}\nPlease report what happened.`
           );
         }
         break;
@@ -1041,7 +1040,7 @@ export class MatchManager {
         }
         break;
       case 'fault_report':
-        await this.notify(matchId, '📋 The fault-reporting window has closed.');
+        await this.notify(matchId, 'The fault-reporting window has closed.');
         await this.refreshMatchMessage(matchId).catch(() => {}); // disables the report button
         break;
       default:
@@ -1061,7 +1060,7 @@ export class MatchManager {
     const info = (ids: string[]) =>
       ids.map((id) => {
         const user = this.ctx.db.repos.users.getById(id);
-        return { id, username: user?.username ?? 'Unknown', elo: user?.elo ?? 1000 };
+        return { id, username: user?.username ?? 'Unknown', elo: user?.elo ?? 0 };
       });
     const ready = this.ctx.db.repos.matches.readyIds(matchId);
     const votes = this.ctx.db.repos.matches.getVotes(matchId);

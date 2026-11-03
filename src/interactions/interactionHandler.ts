@@ -59,18 +59,6 @@ export class InteractionHandler {
         await this.handleStaffBanModal(interaction);
         return;
       }
-      if (customId === 'staff:resetelo:all') {
-        await this.handleStaffResetAllElo(interaction);
-        return;
-      }
-      if (customId === 'staff:resetelo:confirm') {
-        await this.handleStaffResetAllEloConfirmed(interaction);
-        return;
-      }
-      if (customId === 'staff:resetelo:cancel') {
-        await interaction.update({ content: 'Reset cancelled.', components: [] });
-        return;
-      }
       if (customId.startsWith('vote:')) {
         await this.handleVote(interaction, customId);
         return;
@@ -123,7 +111,7 @@ export class InteractionHandler {
     const size = this.ctx.db.repos.queue.count();
     await interaction.reply({
       content: result.ok
-        ? `✅ You joined the queue. **${size}/${this.ctx.settings.queueSize}** players — a match starts automatically once full.`
+        ? `You joined the queue. **${size}/${this.ctx.settings.queueSize}** players — a match starts automatically once full.`
         : result.error ?? 'Could not join the queue.',
       flags: MessageFlags.Ephemeral,
     });
@@ -133,7 +121,7 @@ export class InteractionHandler {
   private async handleLeave(interaction: ButtonInteraction): Promise<void> {
     const result = await this.ctx.queue.leave(interaction.user.id);
     await interaction.reply({
-      content: result.ok ? '🚪 You left the queue.' : result.error ?? 'Could not leave the queue.',
+      content: result.ok ? 'You left the queue.' : result.error ?? 'Could not leave the queue.',
       flags: MessageFlags.Ephemeral,
     });
     await this.ctx.queue.refreshPanel().catch(() => {});
@@ -168,7 +156,7 @@ export class InteractionHandler {
 
   private async staffDenied(interaction: ButtonInteraction): Promise<void> {
     await interaction.reply({
-      content: '⛔ You need the staff role (or Administrator) to use this button.',
+      content: 'You need the staff role (or Administrator) to use this button.',
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -178,8 +166,8 @@ export class InteractionHandler {
     const removed = await this.ctx.queue.clearQueue('The queue was cleared by staff.');
     await interaction.reply({
       content: removed > 0
-        ? `🧹 Cleared the queue — **${removed}** player${removed === 1 ? ' was' : 's were'} removed. They were notified.`
-        : '🧹 The queue is already empty.',
+        ? `Cleared the queue — **${removed}** player${removed === 1 ? ' was' : 's were'} removed. They were notified.`
+        : 'The queue is already empty.',
       flags: MessageFlags.Ephemeral,
     });
     this.ctx.db.repos.audits.log({
@@ -206,49 +194,12 @@ export class InteractionHandler {
       .setMaxLength(200);
     const modal = new ModalBuilder()
       .setCustomId('modal:queueban')
-      .setTitle('🔨 Ban from Queue')
+      .setTitle('Ban from Queue')
       .addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(userIdInput),
         new ActionRowBuilder<TextInputBuilder>().addComponents(reasonInput)
       );
     await interaction.showModal(modal);
-  }
-
-  private async handleStaffResetAllElo(interaction: ButtonInteraction): Promise<void> {
-    if (!this.isStaffButton(interaction)) return this.staffDenied(interaction);
-    // Confirm before destroying everyone's ratings.
-    const confirm = new ButtonBuilder()
-      .setCustomId('staff:resetelo:confirm')
-      .setLabel('Yes, reset all Elo')
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji('✔️');
-    const cancel = new ButtonBuilder()
-      .setCustomId('staff:resetelo:cancel')
-      .setLabel('Cancel')
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji('🚪');
-    await interaction.reply({
-      content: '⚠️ **This resets every player to 1000 Elo.** This cannot be undone. Proceed?',
-      components: [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(confirm, cancel),
-      ],
-      flags: MessageFlags.Ephemeral,
-    });
-  }
-
-  private async handleStaffResetAllEloConfirmed(interaction: ButtonInteraction): Promise<void> {
-    if (!this.isStaffButton(interaction)) return this.staffDenied(interaction);
-    const reset = this.ctx.db.repos.users.resetAllElo();
-    await interaction.update({
-      content: `⚖️ Reset **all ${reset}** player${reset === 1 ? '' : 's'} to **1000 Elo** (peak reset too).`,
-      components: [],
-    });
-    this.ctx.db.repos.audits.log({
-      action: 'elo_reset_all_panel',
-      administrator_id: interaction.user.id,
-      details: JSON.stringify({ count: reset }),
-    });
-    await this.ctx.queue.refreshPanel().catch(() => {});
   }
 
   // -------------------------------------------------------------------------
@@ -273,7 +224,7 @@ export class InteractionHandler {
     const result = await this.ctx.queue.banFromQueue(userId, username, reason, adminId);
     await interaction.reply({
       content: result.ok
-        ? `🔨 Banned **${username}** (\`${userId}\`) from the queue.${reason ? ` Reason: ${reason}` : ''}\nRemove with \`/scrim unban\`.`
+        ? `Banned **${username}** (\`${userId}\`) from the queue.${reason ? ` Reason: ${reason}` : ''}\nRemove with \`/scrim unban\`.`
         : result.error ?? 'Could not ban the player.',
       flags: MessageFlags.Ephemeral,
     });
@@ -332,7 +283,7 @@ export class InteractionHandler {
     const row = new ActionRowBuilder<TextInputBuilder>().addComponents(input);
     const modal = new ModalBuilder()
       .setCustomId(`modal:teamcode:${match.match_id}`)
-      .setTitle('🔑 Submit TeamCode')
+      .setTitle('Submit TeamCode')
       .addComponents(row);
     await interaction.showModal(modal);
   }
@@ -344,7 +295,7 @@ export class InteractionHandler {
       return;
     }
     const result = await this.ctx.matches.pressReady(match.match_id, interaction.user.id);
-    await interaction.reply({ content: result.ok ? '✅ Ready! Waiting for the rest of the lobby…' : result.error ?? 'Could not mark ready.', flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: result.ok ? 'Ready! Waiting for the rest of the lobby…' : result.error ?? 'Could not mark ready.', flags: MessageFlags.Ephemeral });
     await this.ctx.matches.refreshMatchMessage(match.match_id).catch(() => {});
   }
 
@@ -377,7 +328,7 @@ export class InteractionHandler {
     const row = new ActionRowBuilder<TextInputBuilder>().addComponents(text);
     const modal = new ModalBuilder()
       .setCustomId(`modal:cancel:${match.match_id}`)
-      .setTitle('🚫 Cancel / report issue')
+      .setTitle('Cancel / report issue')
       .addComponents(row);
     await interaction.showModal(modal);
   }
@@ -388,7 +339,7 @@ export class InteractionHandler {
       await interaction.reply({ content: 'No TeamCode is available for this match.', flags: MessageFlags.Ephemeral });
       return;
     }
-    await interaction.reply({ content: `🔑 TeamCode: \`${match.team_code}\``, flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: `TeamCode: \`${match.team_code}\``, flags: MessageFlags.Ephemeral });
   }
 
   // -------------------------------------------------------------------------
@@ -610,7 +561,7 @@ export class InteractionHandler {
           return;
         }
         const result = await this.ctx.matches.submitTeamCode(matchId, code, interaction.user.id);
-        await interaction.reply({ content: result.ok ? 'TeamCode submitted ✅' : result.error ?? 'Could not submit.', flags: MessageFlags.Ephemeral });
+        await interaction.reply({ content: result.ok ? 'TeamCode submitted.' : result.error ?? 'Could not submit.', flags: MessageFlags.Ephemeral });
         await this.ctx.matches.refreshMatchMessage(matchId).catch(() => {});
         return;
       }
@@ -650,9 +601,9 @@ export class InteractionHandler {
     const message = error instanceof Error ? error.message : 'An unexpected error occurred.';
     try {
       if (interaction.deferred || interaction.replied) {
-        await interaction.followUp({ content: `⚠️ ${message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.followUp({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
       } else {
-        await interaction.reply({ content: `⚠️ ${message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     } catch {
       // Channel may be gone or interaction expired — nothing actionable.

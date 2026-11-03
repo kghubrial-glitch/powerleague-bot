@@ -152,7 +152,7 @@ export class MatchRepository {
       const row = this.db.prepare('SELECT elo FROM users WHERE discord_id = ?').get(id) as { elo: number } | undefined;
       if (row) rows.push(row);
     }
-    if (rows.length === 0) return 1000;
+    if (rows.length === 0) return 0;
     return Math.round(rows.reduce((a, r) => a + r.elo, 0) / rows.length);
   }
 

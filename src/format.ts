@@ -1,28 +1,51 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { Settings, RankTier } from './config/settings';
 import { QueueEntryRow, MatchRow, UserRow, MapRow, MatchStatus } from './types';
-import { rankForElo, displayRank, divisionForElo, divisionName } from './elo/rankManager';
+import { rankForElo, displayRank } from './elo/rankManager';
 import { MatchRepository } from './database/repositories/matchRepository';
 import { EMBED_COLORS, relativeTimestamp, shortTimestamp, bullet } from './presentation/embeds';
 import { parseDbTimestamp } from './presentation/dbTime';
-import { BRAND_NAME, BRAND_SHORT, BRAND_FOOTER, EMOJI } from './presentation/brand';
+import { BRAND_NAME, BRAND_SHORT, BRAND_FOOTER } from './presentation/brand';
 
 export function clampElo(n: number): number {
   return Math.max(0, Math.round(n));
+}
+
+/** The next rank milestone shown next to the progress bar on profiles. */
+function nextRankLabel(elo: number, ranks: RankTier[]): string {
+  const idx = ranks.findIndex((r) => elo < r.threshold);
+  if (idx === -1) {
+    // Past the highest threshold — progress is within the top rank's divisions.
+    return 'top of the ladder';
+  }
+  const rank = ranks[idx];
+  return `${rank.name.toUpperCase()} (${rank.threshold} Elo)`;
 }
 
 export function userDisplay(user: { username: string; elo: number }): string {
   return `**${user.username}**`;
 }
 
-/** Percent progress from one threshold toward the next (0..100). */
+/**
+ * Percent progress from one rank threshold toward the next (0..100). For the
+ * top rank there is no next threshold, so progress is shown within the current
+ * division instead of always reading 100%.
+ */
 export function rankProgress(elo: number, rank: RankTier, ranks: RankTier[]): number {
   const idx = ranks.findIndex((r) => r.name === rank.name);
   const next = idx >= 0 ? ranks[idx + 1] : undefined;
-  if (!next) return 100;
-  const span = next.threshold - rank.threshold;
-  if (span <= 0) return 100;
-  return Math.max(0, Math.min(100, Math.round(((elo - rank.threshold) / span) * 100)));
+  if (next) {
+    const span = next.threshold - rank.threshold;
+    if (span > 0) return Math.max(0, Math.min(100, Math.round(((elo - rank.threshold) / span) * 100)));
+  }
+  // Top rank: show progress within the current division (a third of the band).
+  const prev = idx > 0 ? ranks[idx - 1] : undefined;
+  if (prev && prev.threshold !== rank.threshold) {
+    const step = (rank.threshold - prev.threshold) / 3;
+    const offset = Math.max(0, elo - rank.threshold);
+    if (step > 0) return Math.max(0, Math.min(100, Math.round((offset / step) * 100)));
+  }
+  return 100;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,11 +105,11 @@ export function queueEmbed(
   const size = settings.queueSize;
   const fmt = settings.matchFormat === 'best_of_3' ? 'Best of 3' : 'Best of 1';
   const mm = settings.matchmakingMode === 'draft' ? 'Captain Draft' : 'Auto Balanced';
-  const status = queueActive ? `${EMOJI.join} Queue **OPEN**` : `${EMOJI.forbidden} Queue **LOCKED**`;
+  const status = queueActive ? `Queue **OPEN**` : `Queue **LOCKED**`;
   const waitingNeeded = Math.max(0, size - entries.length);
 
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI.queue} ${BRAND_NAME} · 3v3 SCRIMS`)
+    .setTitle(`${BRAND_NAME} · 3v3 Scrim Matchmaking`)
     .setColor(queueActive ? EMBED_COLORS.success : EMBED_COLORS.error)
     .setDescription(
       `**${status}**\n` +
@@ -100,12 +123,12 @@ export function queueEmbed(
     const entry = entries[i];
     if (entry) {
       const waited = waitedTime(entry.joined_at);
-      lines.push(`${i + 1}. ${EMOJI.approved} **${entry.username}** — ${entry.elo_at_join} Elo · waiting ${waited}`);
+      lines.push(`${i + 1}. **${entry.username}** — ${entry.elo_at_join} Elo · waiting ${waited}`);
     } else {
-      lines.push(`${i + 1}. ${EMOJI.waiting} Waiting…`);
+      lines.push(`${i + 1}. Waiting…`);
     }
   }
-  embed.addFields({ name: 'CURRENT QUEUE', value: lines.map((l) => `\`${l}\``).join('\n') });
+  embed.addFields({ name: 'CURRENT QUEUE', value: lines.join('\n') });
 
   const body: string[] = [];
   if (entries.length > 0) {
@@ -124,7 +147,7 @@ export function queueEmbed(
   }
   embed.addFields({ name: 'SETTINGS', value: body.join('\n') });
 
-  embed.setFooter({ text: `${BRAND_FOOTER} · six ready players start a scrim · staff controls below` });
+  embed.setFooter({ text: `${BRAND_FOOTER} · six ready players start a scrim` });
   return embed;
 }
 
@@ -139,53 +162,63 @@ function waitedTime(iso: string): string {
   return `${m}m ${rest}s`;
 }
 
+/** Shared help copy for the `!help` and `/help` commands. */
+export function helpText(includePanel = true): string {
+  const lines = [
+    '**Player commands**',
+    '`!join` / `/queue` — join the 3v3 scrim queue',
+    '`!leave` / `/leave` — leave the queue',
+    '`!queue` — show the current queue',
+    '`!profile` / `/profile` — show your profile and Elo',
+    '`!leaderboard` / `/leaderboard` — show the Elo leaderboard',
+    '`!history` / `/history` — show your match history',
+    '`!maps` / `/maps` — show the map pool',
+    '`!match` / `/match` — show your current match',
+    '',
+    '**Staff commands**',
+    '`/scrim setup` — create the matchmaking panel',
+    '`/scrim cancel`, `/scrim result`, `/scrim elo`, `/scrim cooldown`, `/scrim dodge`',
+    '`/scrim map add|remove|toggle`, `/scrim stats`, `/scrim clear`, `/scrim resetelo`, `/scrim ban|unban`',
+  ];
+  if (includePanel) {
+    lines.push('', '**Queueing**', 'Press **Join Queue** on the matchmaking panel, or type `!join` in any channel.');
+  }
+  return lines.join('\n');
+}
+
 export function queueActionRows(): ActionRowBuilder<ButtonBuilder>[] {
   const join = new ButtonBuilder()
     .setCustomId('queue:join')
     .setLabel('Join Queue')
-    .setStyle(ButtonStyle.Success)
-    .setEmoji('✅');
+    .setStyle(ButtonStyle.Success);
   const leave = new ButtonBuilder()
     .setCustomId('queue:leave')
     .setLabel('Leave Queue')
-    .setStyle(ButtonStyle.Danger)
-    .setEmoji('🚪');
-  const refresh = new ButtonBuilder()
-    .setCustomId('queue:refresh')
-    .setLabel('Refresh')
-    .setStyle(ButtonStyle.Secondary)
-    .setEmoji('🔄');
+    .setStyle(ButtonStyle.Danger);
   const profile = new ButtonBuilder()
     .setCustomId('queue:profile')
     .setLabel('My Profile')
-    .setStyle(ButtonStyle.Primary)
-    .setEmoji('👤');
+    .setStyle(ButtonStyle.Primary);
   const leaderboard = new ButtonBuilder()
     .setCustomId('queue:leaderboard')
     .setLabel('Leaderboard')
-    .setStyle(ButtonStyle.Primary)
-    .setEmoji('🏆');
+    .setStyle(ButtonStyle.Primary);
 
   const clear = new ButtonBuilder()
     .setCustomId('staff:queue:clear')
     .setLabel('Clear Queue')
-    .setStyle(ButtonStyle.Secondary)
-    .setEmoji('🧹');
+    .setStyle(ButtonStyle.Secondary);
   const ban = new ButtonBuilder()
     .setCustomId('staff:queue:ban')
     .setLabel('Ban from Queue')
-    .setStyle(ButtonStyle.Danger)
-    .setEmoji('🔨');
-  const resetElo = new ButtonBuilder()
-    .setCustomId('staff:resetelo:all')
-    .setLabel('Reset all Elo')
-    .setStyle(ButtonStyle.Danger)
-    .setEmoji('⚖️');
+    .setStyle(ButtonStyle.Danger);
 
-  const playerRow = new ActionRowBuilder<ButtonBuilder>().addComponents(join, leave, refresh);
+  // The panel refreshes automatically (every button press + every 2 minutes),
+  // so there is no Refresh button. The panel updates all by itself.
+  const playerRow = new ActionRowBuilder<ButtonBuilder>().addComponents(join, leave);
   const infoRow = new ActionRowBuilder<ButtonBuilder>().addComponents(profile, leaderboard);
   // Third row is staff-only: the handlers re-check permissions on every click.
-  const staffRow = new ActionRowBuilder<ButtonBuilder>().addComponents(clear, ban, resetElo);
+  const staffRow = new ActionRowBuilder<ButtonBuilder>().addComponents(clear, ban);
   return [playerRow, infoRow, staffRow];
 }
 
@@ -239,7 +272,7 @@ export function matchStatusLine(match: MatchRow): string {
     case 'voting':
       return 'Phase: **result voting** — cast a private vote';
     case 'confirmed':
-      return `Phase: **completed** — ${EMOJI.trophy} Winner: **${winnerLabel(match.winner)}**`;
+      return `Phase: **completed** — Winner: **${winnerLabel(match.winner)}**`;
     case 'disputed':
       return 'Phase: **disputed** — staff must resolve this match';
     case 'cancelled':
@@ -278,7 +311,7 @@ function matchColor(match: MatchRow): number {
 export function buildMatchEmbed(view: MatchView): EmbedBuilder {
   const { match, teamA, teamB } = view;
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI.queue} ${BRAND_SHORT} MATCH · ${prettyMatchId(match.match_id).toUpperCase()}`)
+    .setTitle(`${BRAND_SHORT} Match · ${prettyMatchId(match.match_id).toUpperCase()}`)
     .setColor(matchColor(match))
     .setDescription(matchStatusLine(match));
 
@@ -287,7 +320,7 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
     players
       .map((p) => {
         const rank = displayRank(p.elo, ranks);
-        return `${EMOJI.approved} <@${p.id}> — ${p.elo} Elo (${rank})`;
+        return `<@${p.id}> — ${p.elo} Elo (${rank})`;
       })
       .join('\n');
 
@@ -297,31 +330,31 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
   );
 
   const details: string[] = [];
-  details.push(`${EMOJI.map} Map: **${match.map ?? 'Not selected'}** · Mode: **${match.game_mode ?? '—'}**`);
-  details.push(`📏 Format: **${match.format === 'best_of_3' ? 'Best of 3' : 'Best of 1'}** · ${match.matchmaking === 'draft' ? 'Captain Draft' : 'Auto Balanced'}`);
+  details.push(`Map: **${match.map ?? 'Not selected'}** · Mode: **${match.game_mode ?? '—'}**`);
+  details.push(`Format: **${match.format === 'best_of_3' ? 'Best of 3' : 'Best of 1'}** · ${match.matchmaking === 'draft' ? 'Captain Draft' : 'Auto Balanced'}`);
   if (match.status === 'awaiting_ready' || match.status === 'in_progress' || match.status === 'voting') {
     const target = match.format === 'best_of_3' ? 'first to 2 of 3' : 'single game';
-    details.push(`🔢 Series: **${match.team_a_score}–${match.team_b_score}** (${target})`);
+    details.push(`Series: **${match.team_a_score}–${match.team_b_score}** (${target})`);
   }
   if (match.status === 'confirmed' || match.status === 'disputed') {
-    details.push(`🔢 Final score: **${match.team_a_score}–${match.team_b_score}**`);
-    if (match.winner) details.push(`🏅 Winner: **${winnerLabel(match.winner)}**`);
+    details.push(`Final score: **${match.team_a_score}–${match.team_b_score}**`);
+    if (match.winner) details.push(`Winner: **${winnerLabel(match.winner)}**`);
   }
   if (match.status === 'voting') {
-    details.push(`🗳️ Votes: **${view.votesCount}/6** cast — choices stay private until voting ends`);
+    details.push(`Votes: **${view.votesCount}/6** cast — choices stay private until voting ends`);
   }
   if (match.status === 'confirmed' || match.status === 'disputed') {
     const countLine = Object.entries(view.voteTotals)
       .filter(([, c]) => c > 0)
       .map(([k, c]) => `${k === 'A' ? 'Team A' : k === 'B' ? 'Team B' : 'Draw'}: ${c}`)
       .join(' · ');
-    if (countLine) details.push(`🗳️ Final votes: ${countLine}`);
+    if (countLine) details.push(`Final votes: ${countLine}`);
   }
   if (match.team_code) {
-    details.push(`🔑 TeamCode: **submitted** (keep it in this channel only)`);
+    details.push(`TeamCode: **submitted** (keep it in this channel only)`);
   }
   if (match.created_at) {
-    details.push(`🕒 Created: ${relativeTimestamp(match.created_at)}`);
+    details.push(`Created: ${relativeTimestamp(match.created_at)}`);
   }
 
   embed.addFields({ name: 'MATCH DETAILS', value: details.join('\n') });
@@ -330,11 +363,11 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
   if (view.fault && (match.status === 'cancelled' || match.status === 'timed_out')) {
     const fault = view.fault;
     const lines: string[] = [];
-    lines.push(`📋 **${fault.reporterCount}/${fault.participantCount}** players have reported`);
+    lines.push(`**${fault.reporterCount}/${fault.participantCount}** players have reported`);
     if (fault.reporterCount >= fault.participantCount) {
       lines.push('All participants reported — suggestions are closed.');
     }
-    const dodges = fault.dodges.map((d) => `⚠️ <@${d.reported_player_id}> — ${d.reports} reports (${d.status.replace(/_/g, ' ')})`).join('\n');
+    const dodges = fault.dodges.map((d) => `<@${d.reported_player_id}> — ${d.reports} reports (${d.status.replace(/_/g, ' ')})`).join('\n');
     if (dodges) lines.push(dodges);
     const playerLines = fault.byReported
       .map((t) => `<@${t.reported_player_id}> — **${t.count}** report${t.count === 1 ? '' : 's'}${Object.keys(t.reasons).length ? ` (${Object.entries(t.reasons).map(([k, v]) => `${k}: ${v}`).join(', ')})` : ''}`)
@@ -364,13 +397,13 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
       sections.push(`**${label}**`);
       for (const p of team) {
         const isReady = readyMembers.has(p.id);
-        sections.push(`${isReady ? EMOJI.ready : '🔘'} <@${p.id}> — ${isReady ? 'READY' : 'WAITING'}`);
+        sections.push(`${isReady ? '[READY]' : '[WAITING]'} <@${p.id}>`);
       }
     }
-    sections.push(`${EMOJI.ready} **${readyMembers.size}/${participants.length}** players ready`);
+    sections.push(`**${readyMembers.size}/${participants.length}** players ready`);
     const waiting = participants.filter((p) => !readyMembers.has(p.id));
     if (waiting.length > 0 && !allReady) {
-      sections.push(`🔎 Still waiting: ${waiting.map((p) => `<@${p.id}>`).join(' ')}`);
+      sections.push(`Still waiting: ${waiting.map((p) => `<@${p.id}>`).join(' ')}`);
     }
     embed.addFields({ name: 'READINESS', value: sections.join('\n') });
   }
@@ -394,30 +427,30 @@ export function matchActionRows(actions: MatchActions): ActionRowBuilder<ButtonB
   const main: Array<ButtonBuilder | null> = [];
   if (actions.vote) {
     main.push(
-      new ButtonBuilder().setCustomId('vote:A').setLabel('Team A won').setStyle(ButtonStyle.Success).setEmoji('🅰️'),
-      new ButtonBuilder().setCustomId('vote:B').setLabel('Team B won').setStyle(ButtonStyle.Danger).setEmoji('🅱️'),
-      new ButtonBuilder().setCustomId('vote:draw').setLabel('Draw').setStyle(ButtonStyle.Secondary).setEmoji('🤝')
+      new ButtonBuilder().setCustomId('vote:A').setLabel('Team A won').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('vote:B').setLabel('Team B won').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('vote:draw').setLabel('Draw').setStyle(ButtonStyle.Secondary)
     );
   } else {
     if (actions.teamCode) {
-      main.push(new ButtonBuilder().setCustomId('match:teamcode').setLabel('TeamCode').setStyle(ButtonStyle.Primary).setEmoji('🔑'));
+      main.push(new ButtonBuilder().setCustomId('match:teamcode').setLabel('TeamCode').setStyle(ButtonStyle.Primary));
     }
     if (actions.ready) {
-      main.push(new ButtonBuilder().setCustomId('match:ready').setLabel('Ready · I joined in-game').setStyle(ButtonStyle.Success).setEmoji('✅'));
+      main.push(new ButtonBuilder().setCustomId('match:ready').setLabel('Ready · I joined in-game').setStyle(ButtonStyle.Success));
     }
     if (actions.copyCode) {
-      main.push(new ButtonBuilder().setCustomId('match:copycode').setLabel('View TeamCode').setStyle(ButtonStyle.Secondary).setEmoji('👁️'));
+      main.push(new ButtonBuilder().setCustomId('match:copycode').setLabel('View TeamCode').setStyle(ButtonStyle.Secondary));
     }
     if (actions.finished) {
-      main.push(new ButtonBuilder().setCustomId('match:finished').setLabel('Match finished').setStyle(ButtonStyle.Primary).setEmoji('🏁'));
+      main.push(new ButtonBuilder().setCustomId('match:finished').setLabel('Match finished').setStyle(ButtonStyle.Primary));
     }
     if (actions.cancel) {
-      main.push(new ButtonBuilder().setCustomId('match:cancel').setLabel('Cancel / issue').setStyle(ButtonStyle.Danger).setEmoji('🚫'));
+      main.push(new ButtonBuilder().setCustomId('match:cancel').setLabel('Cancel / issue').setStyle(ButtonStyle.Danger));
     }
   }
   if (actions.faultButtons) {
     main.push(
-      new ButtonBuilder().setCustomId('fault:select').setLabel('What happened?').setStyle(ButtonStyle.Secondary).setEmoji('📋')
+      new ButtonBuilder().setCustomId('fault:select').setLabel('What happened?').setStyle(ButtonStyle.Secondary)
     );
   }
   const nonNull = main.filter((b): b is ButtonBuilder => b !== null);
@@ -434,37 +467,36 @@ export function matchActionRows(actions: MatchActions): ActionRowBuilder<ButtonB
 export function profileEmbed(user: UserRow, settings: Settings, mapStats?: Array<{ map: string; wins: number; losses: number; draws: number }>): EmbedBuilder {
   const ranks = settings.ranks;
   const rank = rankForElo(user.elo, ranks);
-  const division = divisionForElo(user.elo, ranks);
   const winRate = user.total_matches > 0 ? ((user.wins / user.total_matches) * 100).toFixed(1) : '0.0';
   const streakLabel =
     user.current_streak === 0 ? '—' : `${user.current_streak} ${user.current_streak > 0 ? 'Win' : 'Loss'}${Math.abs(user.current_streak) === 1 ? '' : 'es'}`;
   const progress = rankProgress(user.elo, rank, ranks);
-  const isTopRank = ranks.findIndex((r) => r.name === rank.name) === ranks.length - 1;
+  const nextMilestone = nextRankLabel(user.elo, ranks);
 
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI.profile} PLAYER PROFILE`)
+    .setTitle('PLAYER PROFILE')
     .setDescription(`Player: <@${user.discord_id}>`)
     .setColor(EMBED_COLORS.competitive)
     .addFields(
       {
-        name: '🏆 COMPETITIVE RATING',
-        value: `${user.elo} Elo\nRank: **${displayRank(user.elo, ranks)}**${isTopRank ? '' : ` · ${divisionName(division)}`}`,
+        name: 'COMPETITIVE RATING',
+        value: `${user.elo} Elo\nRank: **${displayRank(user.elo, ranks)}**`,
         inline: false,
       },
-      { name: 'Next rank', value: `${progress}%`, inline: true },
+      { name: 'Progress', value: `${progress}% to ${nextMilestone}`, inline: true },
       { name: 'Peak Elo', value: `${user.peak_elo}`, inline: true },
       {
-        name: '📊 CAREER',
+        name: 'CAREER',
         value: `Matches: **${user.total_matches}**\nWins: **${user.wins}** · Losses: **${user.losses}** · Draws: **${user.draws}**\nWin rate: **${winRate}%**`,
         inline: false,
       },
-      { name: '🔥 Streaks', value: `Current: ${streakLabel}\nBest: ${user.best_streak}`, inline: true }
+      { name: 'Streaks', value: `Current: ${streakLabel}\nBest: ${user.best_streak}`, inline: true }
     );
   if (user.created_at) {
-    embed.addFields({ name: '📅 Registered', value: shortTimestamp(user.created_at), inline: true });
+    embed.addFields({ name: 'Registered', value: shortTimestamp(user.created_at), inline: true });
   }
   if (user.last_match_at) {
-    embed.addFields({ name: '💀 Last match', value: relativeTimestamp(user.last_match_at), inline: true });
+    embed.addFields({ name: 'Last match', value: relativeTimestamp(user.last_match_at), inline: true });
   }
   if (mapStats && mapStats.length > 0) {
     const lines = mapStats
@@ -475,7 +507,7 @@ export function profileEmbed(user: UserRow, settings: Settings, mapStats?: Array
         return `${s.map}: ${s.wins}W/${s.losses}L (${rate}%)`;
       })
       .join('\n');
-    embed.addFields({ name: '🗺️ TOP MAPS', value: lines || 'No data', inline: false });
+    embed.addFields({ name: 'TOP MAPS', value: lines || 'No data', inline: false });
   }
   embed.setFooter({ text: BRAND_NAME });
   return embed;
@@ -489,13 +521,13 @@ export function leaderboardEmbed(
   pages: number,
   settings: Settings
 ): EmbedBuilder {
-  const medal = (i: number): string => (i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${startIndex + i + 1}.`);
+  const rank = (i: number): string => `#${startIndex + i + 1}`;
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI.leaderboard} ${BRAND_NAME} · LEADERBOARD`)
+    .setTitle(`${BRAND_NAME} · Leaderboard`)
     .setColor(EMBED_COLORS.competitive)
     .setDescription(`Sorted by Elo · page **${page + 1}/${pages}**`);
   const lines = rows.map((r, i) => {
-    return `${medal(i)} **${r.username}** — ${r.elo} Elo · ${displayRank(r.elo, settings.ranks)} · ${r.wins}W/${r.losses}L`;
+    return `${rank(i)} **${r.username}** — ${r.elo} Elo · ${displayRank(r.elo, settings.ranks)} · ${r.wins}W/${r.losses}L`;
   });
   embed.addFields({ name: `Top players`, value: lines.join('\n') || 'No players yet' });
   embed.setFooter({ text: BRAND_NAME });
@@ -510,7 +542,7 @@ export function historyEmbed(
   repo: MatchRepository
 ): EmbedBuilder {
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI.queue} ${BRAND_NAME} · MATCH HISTORY`)
+    .setTitle(`${BRAND_NAME} · Match History`)
     .setColor(EMBED_COLORS.competitive)
     .setDescription(`Previous matches · page **${page + 1}/${pages}**`);
 
@@ -536,7 +568,7 @@ function statusShort(status: MatchRow['status']): string {
 
 export function mapsEmbed(maps: MapRow[], recent: Array<{ id: number; name: string; match_id: string | null; selected_at: string }>): EmbedBuilder {
   const embed = new EmbedBuilder()
-    .setTitle(`${EMOJI.map} ${BRAND_NAME} · MAP POOL`)
+    .setTitle(`${BRAND_NAME} · Map Pool`)
     .setColor(EMBED_COLORS.info)
     .setDescription(`${enabledCount(maps)} enabled · ${maps.length - enabledCount(maps)} disabled`);
   const enabled = maps.filter((m) => m.enabled === 1);

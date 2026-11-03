@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Routes, REST, Events } from 'discord.js';
+import { Client, GatewayIntentBits, Routes, REST, Events, Message } from 'discord.js';
 import { loadSettings } from './config/settings';
 import { initDatabase, Database } from './database';
 import { TimerManager } from './services/timerManager';
@@ -9,6 +9,7 @@ import { QueueManager } from './matchmaking/queueManager';
 import { InteractionHandler } from './interactions/interactionHandler';
 import { CommandHandler, registerCommandDefinitions } from './commands/commands';
 import { AdminCommandHandler, registerAdminCommandDefinitions } from './commands/admin';
+import { PrefixHandler } from './commands/prefixHandler';
 import { AppContext } from './context';
 import { registerInteractionEvents } from './events/interactionCreate';
 
@@ -22,7 +23,10 @@ async function main(): Promise<void> {
   }
 
   const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+    // GuildMessages (message events) plus MessageContent are both required for
+    // the `!`-prefixed chat commands; MessageContent is a privileged intent
+    // that must be enabled in the Discord developer portal.
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
   });
 
   const db: Database = initDatabase(settings.databasePath);
@@ -45,6 +49,7 @@ async function main(): Promise<void> {
     interactions: null as unknown as AppContext['interactions'],
     commands: null as unknown as AppContext['commands'],
     admin: null as unknown as AppContext['admin'],
+    prefix: null as unknown as AppContext['prefix'],
   } satisfies AppContext;
 
   const matches = new MatchManager(ctx);
@@ -67,8 +72,13 @@ async function main(): Promise<void> {
   ctx.interactions = new InteractionHandler(ctx);
   ctx.commands = new CommandHandler(ctx);
   ctx.admin = new AdminCommandHandler(ctx);
+  ctx.prefix = new PrefixHandler(ctx);
 
   registerInteractionEvents(ctx);
+
+  client.on(Events.MessageCreate, (message: Message) => {
+    void ctx.prefix.handle(message).catch((e) => console.error('Prefix command error:', e));
+  });
 
   // Register slash commands.
   const rest = new REST({ version: '10' }).setToken(settings.discordToken);
