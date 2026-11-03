@@ -311,6 +311,16 @@ export class InteractionHandler {
   async handleSelectMenu(interaction: StringSelectMenuInteraction): Promise<void> {
     const customId = interaction.customId;
     try {
+      if (customId.startsWith('draft:pick:')) {
+        const matchId = customId.split(CUSTOM_ID_SEPARATOR)[2];
+        const pickedId = interaction.values[0];
+        await interaction.deferUpdate().catch(() => {});
+        const result = await this.ctx.matches.handleDraftPick(interaction, matchId, pickedId);
+        if (!result.ok) {
+          await interaction.followUp({ content: result.error ?? 'Could not process the pick.', flags: MessageFlags.Ephemeral }).catch(() => {});
+        }
+        return;
+      }
       if (customId.startsWith('faultreason:')) {
         const matchId = customId.split(CUSTOM_ID_SEPARATOR)[1];
         const reasonId = interaction.values[0];

@@ -25,6 +25,7 @@ export interface QueueEntryRow {
 }
 
 export type MatchStatus =
+  | 'drafting'
   | 'awaiting_teamcode'
   | 'awaiting_ready'
   | 'in_progress'

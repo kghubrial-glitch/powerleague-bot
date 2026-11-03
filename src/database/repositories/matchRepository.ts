@@ -2,6 +2,7 @@ import { ScrimDatabase } from '../connection';
 import { MatchRow, MatchStatus, VoteChoice } from '../../types';
 
 export const MATCH_STATUSES: MatchStatus[] = [
+  'drafting',
   'awaiting_teamcode',
   'awaiting_ready',
   'in_progress',
@@ -29,7 +30,7 @@ export class MatchRepository {
     const rows = this.db
       .prepare(
         `SELECT * FROM matches
-         WHERE status IN ('awaiting_teamcode','awaiting_ready','in_progress','voting')`
+         WHERE status IN ('drafting','awaiting_teamcode','awaiting_ready','in_progress','voting')`
       )
       .all() as MatchRow[];
     return rows.find((m) => this.isParticipant(m, discordId));
@@ -101,6 +102,46 @@ export class MatchRepository {
     this.db
       .prepare(`UPDATE matches SET status = ?, updated_at = datetime('now') WHERE match_id = ?`)
       .run(status, matchId);
+  }
+
+  /**
+   * Updates team composition and captains after a captain draft completes.
+   * Called only while the match is still in the `drafting` state.
+   */
+  finalizeDraftTeams(matchId: string, teamA: string[], teamB: string[], captainA: string, captainB: string): void {
+    this.db
+      .prepare(
+        `UPDATE matches SET team_a_players = ?, team_b_players = ?,
+           team_a_avg_elo = ?, team_b_avg_elo = ?,
+           captain_a = ?, captain_b = ?, matchmaking = 'draft',
+           updated_at = datetime('now')
+         WHERE match_id = ?`
+      )
+      .run(
+        JSON.stringify(teamA),
+        JSON.stringify(teamB),
+        this.avgEloFor(teamA),
+        this.avgEloFor(teamB),
+        captainA,
+        captainB,
+        matchId
+      );
+  }
+
+  setMatchmakingMode(matchId: string, mode: 'auto' | 'draft'): void {
+    this.db
+      .prepare(`UPDATE matches SET matchmaking = ?, updated_at = datetime('now') WHERE match_id = ?`)
+      .run(mode, matchId);
+  }
+
+  private avgEloFor(ids: string[]): number {
+    const rows = [] as Array<{ elo: number }>;
+    for (const id of ids) {
+      const row = this.db.prepare('SELECT elo FROM users WHERE discord_id = ?').get(id) as { elo: number } | undefined;
+      if (row) rows.push(row);
+    }
+    if (rows.length === 0) return 1000;
+    return Math.round(rows.reduce((a, r) => a + r.elo, 0) / rows.length);
   }
 
   setTeamCode(matchId: string, code: string, submittedBy: string, at: string): boolean {
@@ -260,7 +301,7 @@ export class MatchRepository {
   activeCount(): number {
     const row = this.db
       .prepare(
-        `SELECT COUNT(*) AS c FROM matches WHERE status IN ('awaiting_teamcode','awaiting_ready','in_progress','voting')`
+        `SELECT COUNT(*) AS c FROM matches WHERE status IN ('drafting','awaiting_teamcode','awaiting_ready','in_progress','voting')`
       )
       .get() as { c: number };
     return row.c;

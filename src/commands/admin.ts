@@ -88,6 +88,21 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
   );
   scrim.addSubcommand((s) =>
     s
+      .setName('matchmaking')
+      .setDescription('Switch matchmaking between automatic balanced teams and captain draft.')
+      .addStringOption((o) =>
+        o
+          .setName('mode')
+          .setDescription('Matchmaking mode')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Automatic balanced teams', value: 'auto' },
+            { name: 'Captain draft', value: 'draft' }
+          )
+      )
+  );
+  scrim.addSubcommand((s) =>
+    s
       .setName('dodge')
       .setDescription('Moderator decision on a dodge report.')
       .addStringOption((o) => o.setName('match_id').setDescription('scrim-XXXX').setRequired(true))
@@ -145,6 +160,8 @@ export class AdminCommandHandler {
         return this.stats(interaction);
       case 'resetcode':
         return this.resetCode(interaction);
+      case 'matchmaking':
+        return this.matchmaking(interaction);
       case 'dodge':
         return this.dodge(interaction);
       case 'audit':
@@ -301,6 +318,25 @@ export class AdminCommandHandler {
     const matchId = interaction.options.getString('match_id', true);
     const ok = await this.ctx.matches.staffResetTeamCode(matchId, interaction.user.id);
     await interaction.reply({ content: ok ? `TeamCode for ${matchId} has been reset.` : `Match ${matchId} not found.`, flags: MessageFlags.Ephemeral });
+  }
+
+  private async matchmaking(interaction: ChatInputCommandInteraction): Promise<void> {
+    const mode = interaction.options.getString('mode', true) as 'auto' | 'draft';
+    this.ctx.db.repos.settings.setMatchmakingMode(mode);
+    this.ctx.settings.matchmakingMode = mode;
+    await interaction.reply({
+      content:
+        mode === 'draft'
+          ? 'Matchmaking is now **captain draft**. The two highest-Elo players will captain and draft their teams.'
+          : 'Matchmaking is now **automatic balanced teams**.',
+      flags: MessageFlags.Ephemeral,
+    });
+    this.ctx.db.repos.audits.log({
+      action: 'matchmaking_mode',
+      administrator_id: interaction.user.id,
+      details: JSON.stringify({ mode }),
+    });
+    await this.ctx.queue.refreshPanel().catch(() => {});
   }
 
   private async dodge(interaction: ChatInputCommandInteraction): Promise<void> {

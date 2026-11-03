@@ -8,6 +8,8 @@ import { AuditRepository } from './auditRepository';
 import { DeadlineRepository } from './deadlineRepository';
 import { CooldownRepository } from './cooldownRepository';
 import { PanelRepository } from './panelRepository';
+import { DraftRepository } from './draftRepository';
+import { SettingsRepository } from './settingsRepository';
 
 export class Repositories {
   users: UserRepository;
@@ -19,6 +21,8 @@ export class Repositories {
   deadlines: DeadlineRepository;
   cooldowns: CooldownRepository;
   panels: PanelRepository;
+  drafts: DraftRepository;
+  settings: SettingsRepository;
 
   constructor(public db: ScrimDatabase) {
     this.users = new UserRepository(db);
@@ -30,6 +34,8 @@ export class Repositories {
     this.deadlines = new DeadlineRepository(db);
     this.cooldowns = new CooldownRepository(db);
     this.panels = new PanelRepository(db);
+    this.drafts = new DraftRepository(db);
+    this.settings = new SettingsRepository(db);
   }
 
   transaction<T>(fn: () => T): T {
@@ -46,3 +52,5 @@ export * from './auditRepository';
 export * from './deadlineRepository';
 export * from './cooldownRepository';
 export * from './panelRepository';
+export * from './draftRepository';
+export * from './settingsRepository';

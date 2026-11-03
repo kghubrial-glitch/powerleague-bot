@@ -25,6 +25,9 @@ async function main(): Promise<void> {
   const db: Database = initDatabase(settings.databasePath);
   const repos = db.repos;
 
+  // Persisted runtime settings override config/env (admin control center).
+  settings.matchmakingMode = repos.settings.matchmakingMode();
+
   // Context is built in two passes because the managers reference each other.
   const ctx = {
     client,

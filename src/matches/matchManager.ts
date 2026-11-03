@@ -1,4 +1,15 @@
-import { EmbedBuilder, TextChannel, ChannelType, ButtonBuilder, ButtonStyle, ActionRowBuilder, Message } from 'discord.js';
+import {
+  EmbedBuilder,
+  TextChannel,
+  ChannelType,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+  Message,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
+  InteractionCollector,
+} from 'discord.js';
 import { AppContext } from '../context';
 import { MatchRow, QueueEntryRow, VoteChoice } from '../types';
 import { generateBalancedTeams } from '../matchmaking/teamBalancer';
@@ -7,6 +18,13 @@ import { computeTeamEloChanges } from '../elo/eloCalculator';
 import { rankForElo } from '../elo/rankManager';
 import { buildMatchEmbed, matchActionRows, winnerLabel } from '../format';
 import { evaluateVotes, VoteRecord } from './resultVoting';
+import {
+  draftPool,
+  DRAFT_ORDER,
+  captainForSlot,
+  targetForSlot,
+  isDraftComplete,
+} from './draftManager';
 import { Mutex } from '../services/mutex';
 
 const CATEGORY_NAME = '⚔️ Scrims';
@@ -41,6 +59,10 @@ export class MatchManager {
     return this.mutex.run(async () => {
       const settings = this.ctx.settings;
       if (entries.length < settings.queueSize) return null;
+
+      if (settings.matchmakingMode === 'draft') {
+        return this.createDraftMatch(entries.slice(0, settings.queueSize));
+      }
 
       const players = entries.slice(0, settings.queueSize).map((e) => ({ discordId: e.discord_id, elo: e.elo_at_join }));
       const assignment = generateBalancedTeams(players, { tolerance: settings.teamBalanceTolerance });
@@ -112,6 +134,250 @@ export class MatchManager {
       this.scheduleTeamCodeDeadline(matchId);
       return created;
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Captain draft
+  // -------------------------------------------------------------------------
+
+  /** In-memory channel -> collector map for non-persistent draft menus. */
+  private draftCollectors = new Map<string, InteractionCollector<StringSelectMenuInteraction>>();
+
+  /**
+   * Creates a match in `drafting` state: private channel, a DB match with
+   * empty team arrays, and a draft panel that the two captains operate.
+   */
+  async createDraftMatch(entries: QueueEntryRow[]): Promise<MatchRow | null> {
+    const settings = this.ctx.settings;
+    const matchId = this.ctx.db.repos.matches.nextMatchId();
+
+    const enabledMaps = this.ctx.db.repos.maps.enabled();
+    if (enabledMaps.length === 0) {
+      throw new Error('No enabled maps. An administrator must enable a map first.');
+    }
+    const recentMapIds = this.ctx.db.repos.maps
+      .selectionHistory(20)
+      .map((h) => this.ctx.db.repos.maps.getByName(h.name)?.map_id)
+      .filter((id): id is number => id !== undefined);
+    const selected = selectMap(enabledMaps, recentMapIds, settings.mapRotationMode);
+
+    const { captainA, captainB, pool } = draftPool(
+      entries.map((e) => ({ discordId: e.discord_id, elo: e.elo_at_join }))
+    );
+
+    const guild = this.ctx.client.guilds.cache.get(settings.guildId);
+    if (!guild) throw new Error('Bot is not in the configured guild.');
+    const category = await this.ensureCategory();
+    const channel = await guild.channels.create({
+      name: `scrim-${matchId.replace('scrim-', '')}`,
+      type: ChannelType.GuildText,
+      parent: category,
+    });
+    await channel.permissionOverwrites.create(guild.roles.everyone, { ViewChannel: false });
+    if (settings.staffRoleId) {
+      const role = guild.roles.cache.get(settings.staffRoleId) ?? (await guild.roles.fetch(settings.staffRoleId).catch(() => null));
+      if (role) await channel.permissionOverwrites.create(role, { ViewChannel: true });
+    }
+    for (const id of entries.map((e) => e.discord_id)) {
+      await channel.permissionOverwrites.create(id, { ViewChannel: true });
+    }
+
+    const now = new Date().toISOString();
+    const created = this.ctx.db.repos.transaction<MatchRow>(() => {
+      const match = this.ctx.db.repos.matches.create({
+        match_id: matchId,
+        team_a_players: JSON.stringify([]),
+        team_b_players: JSON.stringify([]),
+        team_a_avg_elo: 0,
+        team_b_avg_elo: 0,
+        map: selected.name,
+        game_mode: selected.game_mode ?? null,
+        format: settings.matchFormat,
+        channel_id: channel.id,
+      });
+      this.ctx.db.repos.matches.updateStatus(matchId, 'drafting');
+      this.ctx.db.repos.matches.setMatchmakingMode(matchId, 'draft');
+      this.ctx.db.repos.maps.markSelected(selected.map_id, matchId, now);
+      this.ctx.db.repos.drafts.create({
+        match_id: matchId,
+        captain_a: captainA,
+        captain_b: captainB,
+        pool: JSON.stringify(pool),
+        current_turn: 'A',
+      });
+      return match;
+    });
+
+    const draftMessage = await channel.send({
+      embeds: [this.draftPanelEmbed(matchId)],
+      components: [this.draftSelectRow(matchId, 'A')],
+    });
+    this.ctx.db.repos.matches.setMessageId(matchId, draftMessage.id);
+    this.ctx.db.repos.audits.log({
+      action: 'draft_created',
+      match_id: matchId,
+      details: JSON.stringify({ captainA, captainB, pool }),
+    });
+    return created;
+  }
+
+  /**
+   * Renders the current draft state: who is picking, the draft order, current
+   * teams and the remaining pool.
+   */
+  draftPanelEmbed(matchId: string): EmbedBuilder {
+    const draft = this.ctx.db.repos.drafts.get(matchId);
+    const match = this.ctx.db.repos.matches.get(matchId);
+    if (!draft || !match) {
+      return new EmbedBuilder().setTitle('Draft').setDescription('Draft state not found.');
+    }
+    const remaining = JSON.parse(draft.pool) as string[];
+    const picks = this.ctx.db.repos.drafts.picks(matchId);
+    const teamA: string[] = [draft.captain_a];
+    const teamB: string[] = [draft.captain_b];
+    for (const p of picks) (p.turn === 'A' ? teamA : teamB).push(p.picked_id);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`CAPTAIN DRAFT — #${matchId.replace('scrim-', '')}`)
+      .setColor(0x5865f2)
+      .setDescription(
+        draft.status === 'completed'
+          ? 'Draft complete — teams are locked.'
+          : `**On the clock:** <@${draft.current_turn === 'A' ? draft.captain_a : draft.captain_b}>\nPick order:** ${DRAFT_ORDER.join(' → ')}**`
+      );
+
+    const formatTeam = (captain: string, members: string[]) =>
+      members.map((id) => `<@${id}>${id === captain ? ' (Captain)' : ''}`).join('\n') || '...';
+
+    embed.addFields(
+      { name: `TEAM A (Captain: <@${draft.captain_a}>)`, value: formatTeam(draft.captain_a, teamA), inline: true },
+      { name: `TEAM B (Captain: <@${draft.captain_b}>)`, value: formatTeam(draft.captain_b, teamB), inline: true }
+    );
+    embed.addFields({
+      name: 'Remaining pool',
+      value: remaining.length > 0 ? remaining.map((id) => `<@${id}>`).join('\n') : 'None',
+      inline: false,
+    });
+    if (match.map) {
+      embed.addFields({ name: 'Map', value: `${match.map}${match.game_mode ? ` (${match.game_mode})` : ''}`, inline: false });
+    }
+    return embed;
+  }
+
+  /** Select row listing the current pool for the captain who is on the clock. */
+  draftSelectRow(matchId: string, forTurn: 'A' | 'B'): ActionRowBuilder<StringSelectMenuBuilder> {
+    const draft = this.ctx.db.repos.drafts.get(matchId);
+    const pool = draft ? (JSON.parse(draft.pool) as string[]) : [];
+    const options = pool.map((id) => {
+      const user = this.ctx.db.repos.users.getById(id);
+      return { label: user?.username ?? 'Unknown player', value: id };
+    });
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId(`draft:pick:${matchId}`)
+      .setPlaceholder(`Pick a teammate for Team ${forTurn}`)
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(options.length > 0 ? options : [{ label: 'No players available', value: '_none' }]);
+    return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+  }
+
+  /**
+   * Handles a captain's pick from the draft select menu. Validates that the
+   * acting captain is the correct one, applies the pick, then either advances
+   * the turn or completes the draft and transitions to `awaiting_teamcode`.
+   */
+  async handleDraftPick(
+    interaction: StringSelectMenuInteraction,
+    matchId: string,
+    pickedId: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    const draft = this.ctx.db.repos.drafts.get(matchId);
+    if (!draft) return { ok: false, error: 'Draft not found.' };
+    if (draft.status !== 'selecting') return { ok: false, error: 'This draft is already complete or expired.' };
+    const actingCaptain = draft.current_turn === 'A' ? draft.captain_a : draft.captain_b;
+    if (interaction.user.id !== actingCaptain) {
+      return { ok: false, error: `Only the captain (<@${actingCaptain}>) can pick right now.` };
+    }
+    if (!JSON.parse(draft.pool).includes(pickedId)) {
+      return { ok: false, error: 'That player is no longer in the pool.' };
+    }
+
+    const pickIndex = draft.turn_index;
+    const turn = captainForSlot(pickIndex);
+    this.ctx.db.repos.drafts.addPick({ match_id: matchId, pick_index: pickIndex, turn, captain_id: interaction.user.id, picked_id: pickedId });
+
+    const newPool = (JSON.parse(draft.pool) as string[]).filter((id) => id !== pickedId);
+    this.ctx.db.repos.drafts.updatePool(matchId, JSON.stringify(newPool));
+    const nextIndex = pickIndex + 1;
+
+    if (isDraftComplete(nextIndex)) {
+      // Finalize teams and open the real match.
+      this.ctx.db.repos.drafts.setStatus(matchId, 'completed');
+      this.ctx.db.repos.drafts.setTurn(matchId, null, nextIndex);
+      await this.finalizeDraft(matchId);
+      return { ok: true };
+    }
+
+    const nextTurn = captainForSlot(nextIndex);
+    this.ctx.db.repos.drafts.setTurn(matchId, nextTurn, nextIndex);
+    await this.refreshDraftMessage(matchId);
+    return { ok: true };
+  }
+
+  /** Finalizes teams from the completed draft, then posts the standard match embed. */
+  private async finalizeDraft(matchId: string): Promise<void> {
+    const draft = this.ctx.db.repos.drafts.get(matchId);
+    const match = this.ctx.db.repos.matches.get(matchId);
+    if (!draft || !match) return;
+    const picks = this.ctx.db.repos.drafts.picks(matchId);
+    const teamA = [draft.captain_a];
+    const teamB = [draft.captain_b];
+    for (const p of picks) (p.turn === 'A' ? teamA : teamB).push(p.picked_id);
+
+    const tx = this.ctx.db.repos.transaction(() => {
+      this.ctx.db.repos.matches.finalizeDraftTeams(matchId, teamA, teamB, draft.captain_a, draft.captain_b);
+      this.ctx.db.repos.matches.updateStatus(matchId, 'awaiting_teamcode');
+    });
+    // Update the panel message in place.
+    const channel = match.channel_id ? (this.ctx.client.channels.cache.get(match.channel_id) as TextChannel | undefined) : undefined;
+    if (channel && match.message_id) {
+      const message = await channel.messages.fetch(match.message_id).catch(() => null);
+      if (message) {
+        await message.edit({
+          embeds: [this.buildEmbed(matchId)],
+          components: matchActionRows(this.actionsForStatus('awaiting_teamcode')),
+        });
+      }
+    }
+    this.scheduleTeamCodeDeadline(matchId);
+    this.ctx.db.repos.audits.log({
+      action: 'draft_completed',
+      match_id: matchId,
+      details: JSON.stringify({ teamA, teamB }),
+    });
+  }
+
+  private async refreshDraftMessage(matchId: string): Promise<void> {
+    const match = this.ctx.db.repos.matches.get(matchId);
+    if (!match?.channel_id || !match?.message_id) return;
+    const channel = this.ctx.client.channels.cache.get(match.channel_id);
+    if (!channel || !(channel instanceof TextChannel)) return;
+    const message = await channel.messages.fetch(match.message_id).catch(() => null);
+    if (!message) return;
+    const draft = this.ctx.db.repos.drafts.get(matchId);
+    if (!draft) return;
+    await message.edit({
+      embeds: [this.draftPanelEmbed(matchId)],
+      components: [this.draftSelectRow(matchId, draft.current_turn as 'A' | 'B')],
+    });
+  }
+
+  /** Re-attaches a draft collector after a restart. */
+  async reconcileDraft(matchId: string): Promise<void> {
+    const draft = this.ctx.db.repos.drafts.get(matchId);
+    if (!draft || draft.status !== 'selecting') return;
+    // The select menu is persistent (custom id), so no collector is strictly
+    // required; this hook exists for future scheduled expiry handling.
   }
 
   private avgElo(ids: string[]): number {
