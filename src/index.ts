@@ -3,6 +3,7 @@ import { loadSettings } from './config/settings';
 import { initDatabase, Database } from './database';
 import { TimerManager } from './services/timerManager';
 import { AuditLogger } from './services/auditLogger';
+import { MatchLogs } from './services/matchLogs';
 import { MatchManager } from './matches/matchManager';
 import { QueueManager } from './matchmaking/queueManager';
 import { InteractionHandler } from './interactions/interactionHandler';
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
 
   // Persisted runtime settings override config/env (admin control center).
   settings.matchmakingMode = repos.settings.matchmakingMode();
+  settings.logsChannelId = repos.settings.get('logs_channel_id') ?? undefined;
 
   // Context is built in two passes because the managers reference each other.
   const ctx = {
@@ -35,6 +37,7 @@ async function main(): Promise<void> {
     db,
     timers: null as unknown as AppContext['timers'],
     audit: null as unknown as AppContext['audit'],
+    logs: null as unknown as AppContext['logs'],
     queue: null as unknown as AppContext['queue'],
     matches: null as unknown as AppContext['matches'],
     interactions: null as unknown as AppContext['interactions'],
@@ -45,6 +48,7 @@ async function main(): Promise<void> {
   const matches = new MatchManager(ctx);
   ctx.matches = matches;
   ctx.audit = new AuditLogger(repos.audits);
+  ctx.logs = new MatchLogs(ctx);
   ctx.timers = new TimerManager(repos.deadlines, {
     teamcode: (matchId) => void matches.onDeadline(matchId, 'teamcode'),
     ready: (matchId) => void matches.onDeadline(matchId, 'ready'),

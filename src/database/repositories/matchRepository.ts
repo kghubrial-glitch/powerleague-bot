@@ -98,6 +98,18 @@ export class MatchRepository {
     this.db.prepare(`UPDATE matches SET message_id = ? WHERE match_id = ?`).run(messageId, matchId);
   }
 
+  setLogMessage(matchId: string, messageId: string, channelId: string): void {
+    this.db
+      .prepare(`UPDATE matches SET log_message_id = ?, log_channel_id = ? WHERE match_id = ?`)
+      .run(messageId, channelId, matchId);
+  }
+
+  clearLogMessage(matchId: string): void {
+    this.db
+      .prepare(`UPDATE matches SET log_message_id = NULL, log_channel_id = NULL WHERE match_id = ?`)
+      .run(matchId);
+  }
+
   updateStatus(matchId: string, status: MatchStatus): void {
     this.db
       .prepare(`UPDATE matches SET status = ?, updated_at = datetime('now') WHERE match_id = ?`)

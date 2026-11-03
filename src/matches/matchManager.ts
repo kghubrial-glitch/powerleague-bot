@@ -132,6 +132,7 @@ export class MatchManager {
         details: JSON.stringify({ channel_id: channel.id, map: selected.name, teamA: teamAIds, teamB: teamBIds }),
       });
 
+      await this.ctx.logs.refresh(matchId).catch(() => {});
       this.scheduleTeamCodeDeadline(matchId);
       return created;
     });
@@ -219,6 +220,7 @@ export class MatchManager {
       match_id: matchId,
       details: JSON.stringify({ captainA, captainB, pool }),
     });
+    await this.ctx.logs.refresh(matchId).catch(() => {});
     return created;
   }
 
@@ -420,6 +422,7 @@ export class MatchManager {
       embeds: [this.buildEmbed(matchId)],
       components: matchActionRows(this.actionsForStatus(match.status)),
     });
+    await this.ctx.logs.refresh(matchId).catch(() => {});
   }
 
   // -------------------------------------------------------------------------

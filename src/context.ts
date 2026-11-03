@@ -3,6 +3,7 @@ import { Settings } from './config/settings';
 import { Database } from './database';
 import { TimerManager } from './services/timerManager';
 import { AuditLogger } from './services/auditLogger';
+import { MatchLogs } from './services/matchLogs';
 import { MatchManager } from './matches/matchManager';
 import { QueueManager } from './matchmaking/queueManager';
 import { InteractionHandler } from './interactions/interactionHandler';
@@ -21,6 +22,7 @@ export interface AppContext {
   db: Database;
   timers: TimerManager;
   audit: AuditLogger;
+  logs: MatchLogs;
   queue: QueueManager;
   matches: MatchManager;
   interactions: InteractionHandler;

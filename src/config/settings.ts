@@ -97,6 +97,7 @@ export interface Settings {
   applicationId: string;
   guildId: string;
   queueChannelId: string | undefined;
+  logsChannelId: string | undefined;
   staffRoleId: string | undefined;
   databasePath: string;
   queueSize: number;
@@ -134,6 +135,7 @@ export function loadSettings(env?: NodeJS.ProcessEnv): Settings {
     applicationId: optionalStr('DISCORD_APPLICATION_ID', '', merged),
     guildId: optionalStr('DISCORD_GUILD_ID', '', merged),
     queueChannelId: optionalStr('QUEUE_CHANNEL_ID', merged),
+    logsChannelId: optionalStr('LOGS_CHANNEL_ID', merged),
     staffRoleId: optionalStr('STAFF_ROLE_ID', merged),
     databasePath: absoluteDbPath,
     queueSize: optionalInt('QUEUE_SIZE', 6, merged),

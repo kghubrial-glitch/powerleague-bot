@@ -103,6 +103,14 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
   );
   scrim.addSubcommand((s) =>
     s
+      .setName('logs')
+      .setDescription('Set the channel where public match logs are posted.')
+      .addChannelOption((o) =>
+        o.setName('channel').setDescription('Text channel for match logs').setRequired(true)
+      )
+  );
+  scrim.addSubcommand((s) =>
+    s
       .setName('dodge')
       .setDescription('Moderator decision on a dodge report.')
       .addStringOption((o) => o.setName('match_id').setDescription('scrim-XXXX').setRequired(true))
@@ -162,6 +170,8 @@ export class AdminCommandHandler {
         return this.resetCode(interaction);
       case 'matchmaking':
         return this.matchmaking(interaction);
+      case 'logs':
+        return this.setLogsChannel(interaction);
       case 'dodge':
         return this.dodge(interaction);
       case 'audit':
@@ -229,7 +239,7 @@ export class AdminCommandHandler {
       flags: MessageFlags.Ephemeral,
     });
     this.ctx.db.repos.audits.log({
-      action: 'admim_elo_adjust',
+      action: 'admin_elo_adjust',
       administrator_id: interaction.user.id,
       target_id: user.discord_id,
       details: JSON.stringify({ amount, previous: user.elo, newElo: updated.elo }),
@@ -337,6 +347,25 @@ export class AdminCommandHandler {
       details: JSON.stringify({ mode }),
     });
     await this.ctx.queue.refreshPanel().catch(() => {});
+  }
+
+  private async setLogsChannel(interaction: ChatInputCommandInteraction): Promise<void> {
+    const channel = interaction.options.getChannel('channel', true);
+    if (!(channel instanceof TextChannel)) {
+      await interaction.reply({ content: 'The logs channel must be a text channel.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    this.ctx.db.repos.settings.set('logs_channel_id', channel.id);
+    this.ctx.settings.logsChannelId = channel.id;
+    await interaction.reply({
+      content: `Match logs will be posted in <#${channel.id}>.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    this.ctx.db.repos.audits.log({
+      action: 'logs_channel_set',
+      administrator_id: interaction.user.id,
+      details: JSON.stringify({ channel_id: channel.id }),
+    });
   }
 
   private async dodge(interaction: ChatInputCommandInteraction): Promise<void> {
