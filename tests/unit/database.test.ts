@@ -20,7 +20,59 @@ afterEach(() => {
 
 describe('Repositories', () => {
   it('seeds default maps', () => {
-    expect(repos.maps.enabled()).toHaveLength(14);
+    const maps = repos.maps.enabled();
+    expect(maps).toHaveLength(14);
+    // every map must carry one of the five canonical game modes
+    const modes = new Set(maps.map((m) => m.game_mode));
+    expect([...modes].sort()).toEqual(['Bounty', 'Brawl Ball', 'Gem Grab', 'Knockout']);
+    // exactly one Brawl Ball grouping: four maps share the canonical spelling
+    expect(maps.filter((m) => m.game_mode === 'Brawl Ball')).toHaveLength(4);
+  });
+
+  it('normalizes game-mode input to the canonical spellings', () => {
+    const added = repos.maps.add('Test Dummy', 'brawlball');
+    expect(added.game_mode).toBe('Brawl Ball');
+    // display-name spelling also normalizes
+    expect(repos.maps.add('Test Dummy', 'Brawl Ball').game_mode).toBe('Brawl Ball');
+    expect(repos.maps.add('Test Dummy', 'BRAWL BALL').game_mode).toBe('Brawl Ball');
+    expect(repos.maps.setGameMode('Test Dummy', 'knockout')).toBe(true);
+    expect(repos.maps.getByName('Test Dummy')?.game_mode).toBe('Knockout');
+    expect(repos.maps.setGameMode('Test Dummy', 'hotzone')).toBe(true);
+    expect(repos.maps.getByName('Test Dummy')?.game_mode).toBe('Hot Zone');
+    // an unknown mode is cleared rather than stored.
+    expect(repos.maps.setGameMode('Test Dummy', 'BrAnDwAIT A')).toBe(true);
+    expect(repos.maps.getByName('Test Dummy')?.game_mode).toBeNull();
+  });
+
+  it('allows exactly one fault report per player per match', () => {
+    repos.users.ensureUser('a', 'A');
+    repos.users.ensureUser('b', 'B');
+    expect(repos.faults.add({ match_id: 'm1', reporter_id: 'a', reported_player_id: 'b', reason: 'Someone dodged' })).toBe(true);
+    // same reporter cannot submit a second report (even a general one)
+    expect(repos.faults.add({ match_id: 'm1', reporter_id: 'a', reported_player_id: '', reason: 'Other' })).toBe(false);
+    // general report by a different player is stored and tallied
+    expect(repos.faults.add({ match_id: 'm1', reporter_id: 'b', reported_player_id: '', reason: 'TeamCode did not work' })).toBe(true);
+    expect(repos.faults.reporterCount('m1')).toBe(2);
+    expect(repos.faults.talliesByReported('m1')).toEqual([
+      { reported_player_id: 'b', count: 1, reasons: { 'Someone dodged': 1 } },
+    ]);
+    expect(repos.faults.generalReasonTallies('m1')).toEqual({ 'TeamCode did not work': 1 });
+    // a brand-new reporter can still point at the same player
+    repos.users.ensureUser('c', 'C');
+    expect(repos.faults.add({ match_id: 'm1', reporter_id: 'c', reported_player_id: 'b', reason: 'Someone dodged' })).toBe(true);
+    expect(repos.faults.countForReported('m1', 'b')).toBe(2);
+    expect(repos.faults.reporterCount('m1')).toBe(3);
+  });
+
+  it('tallies reported players and general reasons', () => {
+    repos.faults.add({ match_id: 'm2', reporter_id: 'a', reported_player_id: 'x', reason: 'Someone dodged' });
+    repos.faults.add({ match_id: 'm2', reporter_id: 'c', reported_player_id: 'x', reason: 'Someone dodged' });
+    repos.faults.add({ match_id: 'm2', reporter_id: 'd', reported_player_id: 'y', reason: 'Someone did not join' });
+    repos.faults.add({ match_id: 'm2', reporter_id: 'b', reported_player_id: '', reason: 'Lobby problem' });
+    const tallies = repos.faults.talliesByReported('m2');
+    expect(tallies[0]).toMatchObject({ reported_player_id: 'x', count: 2 });
+    expect(repos.faults.generalReasonTallies('m2')).toEqual({ 'Lobby problem': 1 });
+    expect(repos.faults.reporterCount('m2')).toBe(4);
   });
 
   it('creates default user profile on first access', () => {
@@ -212,5 +264,17 @@ describe('Repositories', () => {
     const rows = db.prepare('SELECT * FROM panel_state').all();
     expect(rows).toHaveLength(1);
     expect(repos.panels.get()?.message_id).toBe('msg2');
+  });
+
+  it('dodge upserts keep the report tally and update status', () => {
+    repos.faults.addDodge({ match_id: 'm1', reported_player_id: 'x', reports: 5, status: 'awaiting_moderator' });
+    // A moderator decision must not wipe the report-count.
+    repos.faults.addDodge({ match_id: 'm1', reported_player_id: 'x', reports: 0, status: 'moderator_cooldown' });
+    const entries = repos.faults.dodgeEntries('m1');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ reported_player_id: 'x', reports: 5, status: 'moderator_cooldown' });
+    // A lower count must also not reduce it.
+    repos.faults.addDodge({ match_id: 'm1', reported_player_id: 'x', reports: 2, status: 'moderator_clear' });
+    expect(repos.faults.dodgeEntries('m1')[0].reports).toBe(5);
   });
 });

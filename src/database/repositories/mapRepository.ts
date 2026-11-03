@@ -1,22 +1,31 @@
 import { ScrimDatabase } from '../connection';
 import { MapRow } from '../../types';
+import { canonicalGameMode } from '../../matchmaking/gameModes';
 
-/** Official map pool with correct Brawl Stars game-mode associations. */
+/**
+ * Official map pool. Every mode is one of the five the bot accepts
+ * (Gem Grab, Bounty, Knockout, Brawl Ball, Hot Zone) so the /scrim map
+ * commands and the pool can never disagree with each other.
+ */
 export const DEFAULT_MAPS: Array<{ name: string; gameMode: string }> = [
+  // Gem Grab
   { name: 'Hard Rock Mine', gameMode: 'Gem Grab' },
   { name: 'Crystal Arcade', gameMode: 'Gem Grab' },
   { name: 'Deathcap Trap', gameMode: 'Gem Grab' },
-  { name: 'Kaboom Canyon', gameMode: 'Heist' },
-  { name: 'Safe Zone', gameMode: 'Heist' },
-  { name: 'Hot Potato', gameMode: 'Heist' },
-  { name: 'Bridge Too Far', gameMode: 'Heist' },
-  { name: 'Shooting Star', gameMode: 'Bounty' },
-  { name: 'Hideout', gameMode: 'Bounty' },
+  // Bounty
   { name: 'Dry Season', gameMode: 'Bounty' },
+  { name: 'Hideout', gameMode: 'Bounty' },
+  { name: 'Shooting Star', gameMode: 'Bounty' },
+  // Knockout
   { name: "Belle's Rock", gameMode: 'Knockout' },
-  { name: 'Out in the Open', gameMode: 'Knockout' },
   { name: 'Flaring Phoenix', gameMode: 'Knockout' },
   { name: 'New Horizons', gameMode: 'Knockout' },
+  { name: 'Out in the Open', gameMode: 'Knockout' },
+  // Brawl Ball
+  { name: 'Backyard Bowl', gameMode: 'Brawl Ball' },
+  { name: 'Center Stage', gameMode: 'Brawl Ball' },
+  { name: 'Sneaky Fields', gameMode: 'Brawl Ball' },
+  { name: 'Triple Dribble', gameMode: 'Brawl Ball' },
 ];
 
 export class MapRepository {
@@ -46,12 +55,14 @@ export class MapRepository {
   }
 
   add(name: string, gameMode?: string): MapRow {
+    const mode = canonicalGameMode(gameMode ?? '') ?? null;
     this.db
       .prepare('INSERT OR IGNORE INTO maps (name, game_mode) VALUES (?, ?)')
-      .run(name, gameMode ?? null);
+      .run(name, mode);
     const row = this.getByName(name);
     if (!row) throw new Error(`Failed to add map "${name}"`);
-    return row;
+    if (mode && row.game_mode !== mode) this.setGameMode(row.map_id, mode);
+    return this.getByName(name)!;
   }
 
   remove(name: string): boolean {
@@ -66,10 +77,12 @@ export class MapRepository {
     return this.getById(row.map_id);
   }
 
-  setGameMode(nameOrId: string, gameMode: string | null): boolean {
-    const row = this.getByName(nameOrId) ?? (this.getById(Number(nameOrId)) as MapRow | undefined);
+  setGameMode(nameOrId: string | number, gameMode: string | null): boolean {
+    const row =
+      typeof nameOrId === 'number' ? this.getById(nameOrId) : (this.getByName(nameOrId) ?? (this.getById(Number(nameOrId)) as MapRow | undefined));
     if (!row) return false;
-    this.db.prepare('UPDATE maps SET game_mode = ? WHERE map_id = ?').run(gameMode, row.map_id);
+    const mode = canonicalGameMode(gameMode ?? '') ?? null;
+    this.db.prepare('UPDATE maps SET game_mode = ? WHERE map_id = ?').run(mode, row.map_id);
     return true;
   }
 

@@ -59,6 +59,64 @@ function addColumnIfMissing(db: ScrimDatabase, table: string, column: string, de
   }
 }
 
+/**
+ * Corrects the map-pool game modes and adds the missing official maps.
+ *
+ * A prior implementation stored game modes as a free-text string, so admins
+ * could (and did) end up with two different spellings of the same mode (e.g.
+ * "BRAWL BALL" vs "Brawl Ball") and maps with no mode at all. This normalizes
+ * known spellings to canonical display names, clears junk values, fills in
+ * NULL modes for the official pool, and inserts currently-missing official
+ * maps. Legacy 'Heist' rows are left untouched (they stay playable); the
+ * allowed /scrim map command set is the five modes in GAME_MODE_CHOICES.
+ */
+const CANONICAL_GAME_MODES = ['gem grab', 'bounty', 'knockout', 'brawl ball', 'hot zone'];
+
+function migration003(db: ScrimDatabase): void {
+  // 1. Normalize case-insensitive spellings of known modes to their canonical
+  //    display name (Gem Grab, Bounty, Knockout, Brawl Ball, Hot Zone).
+  const normalize = db.prepare(
+    'UPDATE maps SET game_mode = ? WHERE TRIM(LOWER(game_mode)) = ?'
+  );
+  const displayNames: Record<string, string> = {
+    'gem grab': 'Gem Grab',
+    bounty: 'Bounty',
+    knockout: 'Knockout',
+    'brawl ball': 'Brawl Ball',
+    'hot zone': 'Hot Zone',
+  };
+  for (const [slug, display] of Object.entries(displayNames)) {
+    normalize.run(display, slug);
+  }
+
+  // 2. Wipe anything left that is not a recognized mode (free-text junk,
+  //    "UNSPECIFIED", etc.). Legacy 'Heist' rows are preserved so existing
+  //    maps stay playable; admins just can't pick Heist via /scrim map.
+  const preservedModes = [...CANONICAL_GAME_MODES, 'heist'];
+  db.prepare(
+    `UPDATE maps SET game_mode = NULL
+     WHERE game_mode IS NOT NULL
+       AND TRIM(LOWER(game_mode)) NOT IN (${preservedModes.map(() => '?').join(', ')})`
+  ).run(...preservedModes);
+
+  // 3. Apply canonical per-map modes to maps that still have no mode, then
+  //    insert maps from the official pool that are missing entirely.
+  const byMode: Record<string, string[]> = {
+    'Gem Grab': ['Hard Rock Mine', 'Crystal Arcade', 'Deathcap Trap'],
+    Bounty: ['Shooting Star', 'Hideout', 'Dry Season'],
+    Knockout: ["Belle's Rock", 'Out in the Open', 'Flaring Phoenix', 'New Horizons'],
+    'Brawl Ball': ['Backyard Bowl', 'Center Stage', 'Sneaky Fields', 'Triple Dribble'],
+  };
+  const fix = db.prepare('UPDATE maps SET game_mode = ? WHERE name = ? AND game_mode IS NULL');
+  const insert = db.prepare('INSERT OR IGNORE INTO maps (name, game_mode) VALUES (?, ?)');
+  for (const [mode, names] of Object.entries(byMode)) {
+    for (const name of names) {
+      fix.run(mode, name);
+      insert.run(name, mode);
+    }
+  }
+}
+
 function migration002(db: ScrimDatabase): void {
   // --- matches: 2.0 columns ------------------------------------------------
   addColumnIfMissing(db, 'matches', 'matchmaking', "TEXT NOT NULL DEFAULT 'auto'");
@@ -145,9 +203,39 @@ function migration002(db: ScrimDatabase): void {
   `);
 }
 
+/**
+ * Tightens fault reporting so every participant can submit exactly one report
+ * per match. The old design let a player file the same report repeatedly and
+ * general ("TeamCode broken") reports were only written to the audit log.
+ *
+ * NOTE: this adds a unique index only — the table is NOT rebuilt. better-sqlite3
+ * keeps a per-database prepared-statement cache, and DROP/ALTER-then-RENAME
+ * crashes at statement finalization; the empty-string sentinel below is how a
+ * "general" report is stored while keeping `reported_player_id NOT NULL`.
+ */
+function migration004(db: ScrimDatabase): void {
+  // 1. Prune legacy duplicates, keeping the earliest report per (match, reporter).
+  db.prepare(
+    `DELETE FROM fault_reports
+     WHERE id NOT IN (SELECT MIN(id) FROM fault_reports GROUP BY match_id, reporter_id)`
+  ).run();
+
+  // 2. Enforce one submission per player per match at the database layer.
+  db.exec(
+    `CREATE UNIQUE INDEX IF NOT EXISTS fault_reports_one_per_reporter
+     ON fault_reports (match_id, reporter_id)`
+  );
+
+  // 3. Normalize any existing stored "empty" reported player values that were
+  //    meant as general reports (defensive; the manager layer now stores '').
+  db.prepare(`UPDATE fault_reports SET reported_player_id = '' WHERE reported_player_id IS NULL`).run();
+}
+
 const MIGRATIONS: Array<{ version: number; run: (db: ScrimDatabase) => void }> = [
   { version: 1, run: migration001 },
   { version: 2, run: migration002 },
+  { version: 3, run: migration003 },
+  { version: 4, run: migration004 },
 ];
 
 function runMigrations(db: ScrimDatabase): void {

@@ -287,10 +287,14 @@ export class InteractionHandler {
       await interaction.reply({ content: 'Fault reporting is only available for cancelled/timed-out matches.', flags: MessageFlags.Ephemeral });
       return;
     }
+    if (!this.ctx.matches.isFaultReportingOpen(match.match_id)) {
+      await interaction.reply({ content: 'The fault-report window for this match has closed.', flags: MessageFlags.Ephemeral });
+      return;
+    }
     const reasons = this.ctx.matches.faultReasons();
-    const last = this.ctx.db.repos.faults.forMatch(match.match_id).filter((r) => r.reporter_id === interaction.user.id);
-    if (last.some((r) => r.reported_player_id)) {
-      await interaction.reply({ content: 'You have already submitted a player report for this match.', flags: MessageFlags.Ephemeral });
+    const already = this.ctx.db.repos.faults.forMatch(match.match_id).some((r) => r.reporter_id === interaction.user.id);
+    if (already) {
+      await interaction.reply({ content: 'You have already submitted a report for this match. One report per player.', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -364,6 +368,9 @@ export class InteractionHandler {
       const result = await this.ctx.matches.submitFault(matchId, interaction.user.id, null, reason.label);
       if (!result.ok) {
         await interaction.update({ content: result.error ?? 'Could not record the report.', components: [] });
+      } else {
+        await interaction.update({ content: 'Your report has been recorded.', components: [] });
+        await this.ctx.matches.refreshMatchMessage(matchId).catch(() => {});
       }
       return;
     }
@@ -400,10 +407,13 @@ export class InteractionHandler {
     );
     await interaction.update({
       content: result.ok
-        ? 'Your report has been recorded.'
+        ? result.escalated
+          ? 'Your report has been recorded. This player now needs moderator review.'
+          : 'Your report has been recorded.'
         : result.error ?? 'Could not record the report.',
       components: [],
     });
+    await this.ctx.matches.refreshMatchMessage(matchId).catch(() => {});
   }
 
   private async handleFaultPlayer(interaction: ButtonInteraction, customId: string): Promise<void> {
@@ -423,9 +433,14 @@ export class InteractionHandler {
     const reason = this.ctx.matches.faultReasons().find((r) => r.id === reasonId);
     const result = await this.ctx.matches.submitFault(matchId, interaction.user.id, reportedId, reason?.label ?? 'Other');
     await interaction.reply({
-      content: result.ok ? 'Your report has been recorded.' : result.error ?? 'Could not record the report.',
+      content: result.ok
+        ? result.escalated
+          ? 'Your report has been recorded. This player now needs moderator review.'
+          : 'Your report has been recorded.'
+        : result.error ?? 'Could not record the report.',
       flags: MessageFlags.Ephemeral,
     });
+    await this.ctx.matches.refreshMatchMessage(matchId).catch(() => {});
   }
 
   // -------------------------------------------------------------------------

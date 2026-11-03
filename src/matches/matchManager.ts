@@ -19,6 +19,8 @@ import { rankForElo, rankKey, displayRank } from '../elo/rankManager';
 import { buildMatchEmbed, matchActionRows, winnerLabel } from '../format';
 import { EMBED_COLORS } from '../presentation/embeds';
 import { evaluateVotes, VoteRecord } from './resultVoting';
+import { shouldEscalateDodge, FAULT_VOTE_REQUIRED } from './faultDecision';
+import { NO_REPORTED_PLAYER } from '../database/repositories/faultRepository';
 import {
   draftPool,
   DRAFT_ORDER,
@@ -420,7 +422,7 @@ export class MatchManager {
     if (!message.editable) return;
     await message.edit({
       embeds: [this.buildEmbed(matchId)],
-      components: matchActionRows(this.actionsForStatus(match.status)),
+      components: matchActionRows(this.actionsForStatus(match.status, matchId)),
     });
     await this.ctx.logs.refresh(matchId).catch(() => {});
   }
@@ -802,12 +804,18 @@ export class MatchManager {
     const embed = new EmbedBuilder()
       .setTitle(`MATCH CANCELLED — #${matchId.replace('scrim-', '')}`)
       .setColor(0xed4245)
-      .setDescription(`Reason: **${reason}**\n\nWhat happened to the match? Let us know below.`);
+      .setDescription(
+        `Reason: **${reason}**\n\nWhat happened to the match? Report below — you can report once.\n` +
+          `If **4 players from both teams** agree on a player, staff is notified for review.`
+      );
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId('fault:select').setLabel('REPORT WHAT HAPPENED').setStyle(ButtonStyle.Secondary)
     );
     await channel.send({ embeds: [embed], components: [row] });
     this.scheduleFaultDeadline(matchId);
+    // Keep the main match embed in the cancelled state so the live dashboard
+    // (reporter count, tallies) stays visible and up to date.
+    await this.refreshMatchMessage(matchId).catch(() => {});
   }
 
   // -------------------------------------------------------------------------
@@ -818,67 +826,106 @@ export class MatchManager {
     return FAULT_REASONS;
   }
 
+  /** Whether a cancelled/timed-out match still accepts fault reports. */
+  isFaultReportingOpen(matchId: string): boolean {
+    return this.isFaultWindowOpen(matchId);
+  }
+
   async submitFault(
     matchId: string,
     reporterId: string,
     reportedId: string | null,
     reason: string
-  ): Promise<{ ok: boolean; error?: string }> {
+  ): Promise<{ ok: boolean; error?: string; escalated?: boolean }> {
     const match = this.ctx.db.repos.matches.get(matchId);
     if (!match) return { ok: false, error: 'Match not found.' };
+    if (match.status !== 'cancelled' && match.status !== 'timed_out') {
+      return { ok: false, error: 'Fault reporting is only available for cancelled/timed-out matches.' };
+    }
+    if (!this.isFaultWindowOpen(matchId)) {
+      return { ok: false, error: 'The fault-report window for this match has closed.' };
+    }
     if (!this.ctx.db.repos.matches.isParticipant(match, reporterId)) {
       return { ok: false, error: 'Only participants can report.' };
     }
-    if (reportedId) {
-      if (reportedId === reporterId) return { ok: false, error: 'You cannot report yourself.' };
-      const inserted = this.ctx.db.repos.faults.add({
-        match_id: matchId,
-        reporter_id: reporterId,
-        reported_player_id: reportedId,
-        reason,
-      });
-      if (!inserted) return { ok: false, error: 'You have already reported this player for this match.' };
-      await this.processFaultReport(matchId, reportedId);
-    } else {
-      this.ctx.db.repos.audits.log({
-        action: 'fault_category',
-        match_id: matchId,
-        target_id: reporterId,
-        details: JSON.stringify({ reason }),
-      });
-      await this.notify(matchId, `Report recorded: **${reason}**. Staff will review.`);
+    if (reportedId && reportedId === reporterId) {
+      return { ok: false, error: 'You cannot report yourself.' };
     }
+    const inserted = this.ctx.db.repos.faults.add({
+      match_id: matchId,
+      reporter_id: reporterId,
+      reported_player_id: reportedId || NO_REPORTED_PLAYER,
+      reason,
+    });
+    if (!inserted) {
+      return { ok: false, error: 'You have already submitted a report for this match. One report per player.' };
+    }
+
+    this.ctx.db.repos.audits.log({
+      action: reportedId ? 'fault_report' : 'fault_category',
+      match_id: matchId,
+      target_id: reporterId,
+      details: JSON.stringify({ reported_id: reportedId ?? null, reason }),
+    });
     this.scheduleFaultDeadline(matchId);
+
+    if (reportedId) {
+      const escalated = await this.processFaultReport(matchId, reportedId);
+      await this.refreshMatchMessage(matchId).catch(() => {});
+      if (escalated) {
+        return { ok: true, escalated: true };
+      }
+    } else {
+      await this.refreshMatchMessage(matchId).catch(() => {});
+    }
     return { ok: true };
   }
 
-  private async processFaultReport(matchId: string, reportedId: string): Promise<void> {
+  /**
+   * Counts reports for `reportedId` (excluding the accused player's own voice)
+   * and — when at least REQUIRED_VOTE_COUNT players from both teams agree —
+   * upserts an `awaiting_moderator` dodge report and notifies staff + channel.
+   * Returns true when a dodge was escalated.
+   */
+  private async processFaultReport(matchId: string, reportedId: string): Promise<boolean> {
     const match = this.ctx.db.repos.matches.get(matchId);
-    if (!match) return;
+    if (!match) return false;
     const teamA = this.ctx.db.repos.matches.teamAIds(match);
     const teamB = this.ctx.db.repos.matches.teamBIds(match);
 
     const reports = this.ctx.db.repos.faults.forMatch(matchId).filter(
       (r) => r.reported_player_id === reportedId && r.reporter_id !== reportedId
     );
-    const count = reports.length;
-    if (count >= REQUIRED_VOTE_COUNT) {
-      const reporterTeams = new Set(
-        reports.map((r) => (teamA.includes(r.reporter_id) ? 'A' : teamB.includes(r.reporter_id) ? 'B' : '?'))
-      );
-      if (reporterTeams.size >= 2) {
-        this.ctx.db.repos.faults.addDodge({
-          match_id: matchId,
-          reported_player_id: reportedId,
-          reports: count,
-          status: 'awaiting_moderator',
-        });
-        await this.notifyStaff(
-          `**DODGE REPORT**\n\nMatch: **#${matchId.replace('scrim-', '')}**\nReported player: <@${reportedId}>\n` +
-            `Reports: ${count}\nStatus: **AWAITING MODERATOR REVIEW**`
-        );
-      }
+    if (!shouldEscalateDodge({ reportedPlayerId: reportedId, reporterIds: reports.map((r) => r.reporter_id), teamA, teamB })) {
+      return false;
     }
+    const count = reports.length;
+
+    this.ctx.db.repos.faults.addDodge({
+      match_id: matchId,
+      reported_player_id: reportedId,
+      reports: count,
+      status: 'awaiting_moderator',
+    });
+
+    const embed = new EmbedBuilder()
+      .setTitle(`DODGE REPORT — #${matchId.replace('scrim-', '')}`)
+      .setColor(0xed4245)
+      .setDescription(
+        `Reported player: **<@${reportedId}>**\nReports: **${count}**\n\n` +
+          `A dodge to this degree needs **moderator review** — nobody is punished automatically.\n` +
+          `Staff can confirm with \`/scrim dodge\` (match_id, player, decision).`
+      );
+    const channel = match.channel_id ? this.ctx.client.channels.cache.get(match.channel_id) : undefined;
+    if (channel instanceof TextChannel) {
+      await channel.send({ embeds: [embed] }).catch(() => {});
+    }
+    await this.notifyStaff(
+      `**DODGE REPORT**\n\nMatch: **#${matchId.replace('scrim-', '')}**\nReported player: <@${reportedId}>\n` +
+        `Reports: ${count}\nStatus: **AWAITING MODERATOR REVIEW**\n` +
+        `Resolve with \`/scrim dodge\`.`
+    );
+    return true;
   }
 
   /** Admin decision on a dodge report: apply a cooldown or clear it. */
@@ -893,10 +940,13 @@ export class MatchManager {
       const until = new Date(Date.now() + durationMinutes * 60_000).toISOString();
       this.ctx.db.repos.cooldowns.set(reportedId, until, `Dodge in match ${matchId}`, adminId);
     }
+    const existing = this.ctx.db.repos.faults
+      .dodgeEntries(matchId)
+      .find((d) => d.reported_player_id === reportedId);
     this.ctx.db.repos.faults.addDodge({
       match_id: matchId,
       reported_player_id: reportedId,
-      reports: decision === 'cooldown' ? 0 : 0,
+      reports: existing?.reports ?? 0,
       status: decision === 'cooldown' ? 'moderator_cooldown' : 'moderator_clear',
     });
     this.ctx.db.repos.audits.log({
@@ -906,6 +956,13 @@ export class MatchManager {
       target_id: reportedId,
       details: JSON.stringify({ decision, durationMinutes }),
     });
+    await this.refreshMatchMessage(matchId).catch(() => {});
+    await this.notify(
+      matchId,
+      decision === 'cooldown'
+        ? `Dodge confirmed for <@${reportedId}> — ${durationMinutes}-minute matchmaking cooldown.`
+        : `Dodge report for <@${reportedId}> was cleared (no action).`
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -971,6 +1028,7 @@ export class MatchManager {
         break;
       case 'fault_report':
         await this.notify(matchId, 'The fault-reporting window has closed.');
+        await this.refreshMatchMessage(matchId).catch(() => {}); // disables the report button
         break;
       default:
         break;
@@ -996,6 +1054,18 @@ export class MatchManager {
     const tallies: Record<string, number> = { A: 0, B: 0, draw: 0 };
     for (const v of votes) tallies[v.vote] = (tallies[v.vote] ?? 0) + 1;
 
+    const participants = match.status === 'cancelled' || match.status === 'timed_out' ? [...teamA, ...teamB] : [];
+    const fault =
+      match.status === 'cancelled' || match.status === 'timed_out'
+        ? {
+            reporterCount: this.ctx.db.repos.faults.reporterCount(matchId),
+            participantCount: participants.length,
+            byReported: this.ctx.db.repos.faults.talliesByReported(matchId),
+            general: this.ctx.db.repos.faults.generalReasonTallies(matchId),
+            dodges: this.ctx.db.repos.faults.dodgeEntries(matchId),
+          }
+        : undefined;
+
     return buildMatchEmbed({
       match,
       teamA: info(teamA),
@@ -1005,11 +1075,12 @@ export class MatchManager {
       voteTotals: tallies,
       ranks: this.ctx.settings.ranks,
       maps: [],
+      fault,
     });
   }
 
   /** Chooses which buttons are live for a given match status. */
-  private actionsForStatus(status: MatchRow['status']) {
+  private actionsForStatus(status: MatchRow['status'], matchId?: string) {
     switch (status) {
       case 'awaiting_teamcode':
         return { teamCode: true, ready: false, finished: false, cancel: true, vote: false, copyCode: false, faultButtons: false };
@@ -1021,10 +1092,25 @@ export class MatchManager {
         return { teamCode: false, ready: false, finished: false, cancel: false, vote: true, copyCode: false, faultButtons: false };
       case 'cancelled':
       case 'timed_out':
-        return { teamCode: false, ready: false, finished: false, cancel: false, vote: false, copyCode: false, faultButtons: true };
+        return {
+          teamCode: false,
+          ready: false,
+          finished: false,
+          cancel: false,
+          vote: false,
+          copyCode: false,
+          faultButtons: matchId ? this.isFaultWindowOpen(matchId) : true,
+        };
       default:
         return { teamCode: false, ready: false, finished: false, cancel: false, vote: false, copyCode: false, faultButtons: false };
     }
+  }
+
+  /** Whether the fault-report window is still open for a cancelled match. */
+  private isFaultWindowOpen(matchId: string): boolean {
+    const deadline = this.ctx.db.repos.deadlines.get(matchId, 'fault_report');
+    if (!deadline) return true;
+    return new Date(deadline.due_at).getTime() > Date.now();
   }
 
   private setMatchStatus(matchId: string, status: MatchRow['status']): void {

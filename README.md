@@ -25,9 +25,11 @@ profiles, streaks and the leaderboard.
   boundary announces in the match channel.
 - **Per-player map statistics** — confirmed matches record wins/losses/draws
   per map and the profile shows a TOP MAPS panel with map-specific win rate.
-- **Map pool** — the 14 classic Power League maps seeded by default. Admins can
-  add/remove/toggle maps and set optional game modes. Selection avoids recently
-  used maps when alternatives exist.
+- **Map pool** — the 14 classic Power League maps seeded by default (Gem Grab,
+  Bounty, Knockout, Brawl Ball, Hot Zone). Admins can add/remove/toggle maps
+  and set a game mode, but the mode is restricted to the fixed set
+  `hotzone / brawlball / bounty / knockout / gemgrab` — free-text modes are
+  rejected. Selection avoids recently used maps when alternatives exist.
 - **Private match channels** — only the six players, staff, and the bot can view
   the match channel. Initial message shows teams, map, and format.
 - **TeamCode flow** — any participant submits the in-game TeamCode through a
@@ -42,8 +44,13 @@ profiles, streaks and the leaderboard.
 - **Timeouts & cancellation** — teamcode, readiness, match, voting and fault
   reporting all have persisted deadlines that survive a bot restart.
 - **Fault & dodge reporting** — cancelled/timed-out matches let participants
-  report what happened. Dodge accusations need cross-team quorum to be
-  escalated, and only moderators decide on cooldowns (no auto-punishment).
+  report what happened **once per player per match** (repeated report buttons
+  are ignored). Reports feed a live dashboard in the match channel showing how
+  many players have reported and the current tallies. If **4 players from both
+  teams** accuse the same player a `DODGE REPORT` is posted and staff is
+  notified; only moderators decide on cooldowns (`/scrim dodge`), there is no
+  auto-punishment. The report window closes after the fault-report deadline
+  and the button is then disabled.
 - **Match history & leaderboard** — paginated history per player, default
   competitive leaderboard filter by minimum matches (configurable).
 - **Public match logs** — a configurable logs channel receives one public
@@ -207,7 +214,9 @@ All admin commands require the configured `STAFF_ROLE_ID` or
 8. Confirmed results update Elo exactly once and stats/leaderboard refresh.
 
 If a step times out, the bot cancels the match, keeps Elo untouched, and opens
-fault reporting so moderators can review.
+fault reporting so moderators can review. Each player can report once; if 4
+players from both teams accuse the same player, the bot creates a dodge report
+and notifies staff (no automatic punishment).
 
 ---
 

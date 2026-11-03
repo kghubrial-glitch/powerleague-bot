@@ -11,6 +11,7 @@ import {
 import { AppContext } from '../context';
 import { rankForElo } from '../elo/rankManager';
 import { queueEmbed, queueActionRows } from '../format';
+import { GAME_MODES, GAME_MODE_CHOICES, isGameMode } from '../matchmaking/gameModes';
 import { isStaff } from './commands';
 
 export type AnyCommandBuilder = SlashCommandBuilder | ReturnType<SlashCommandBuilder['addSubcommandGroup']> | ReturnType<SlashCommandBuilder['addSubcommand']>;
@@ -58,7 +59,15 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
     g
       .setName('map')
       .setDescription('Manage the map pool.')
-      .addSubcommand((m) => m.setName('add').setDescription('Add a map.').addStringOption((o) => o.setName('name').setDescription('Map name').setRequired(true)))
+      .addSubcommand((m) =>
+        m
+          .setName('add')
+          .setDescription('Add a map.')
+          .addStringOption((o) => o.setName('name').setDescription('Map name').setRequired(true))
+          .addStringOption((o) =>
+            o.setName('mode').setDescription('Game mode (required).').setRequired(true).addChoices(...GAME_MODE_CHOICES)
+          )
+      )
       .addSubcommand((m) => m.setName('remove').setDescription('Remove a map.').addStringOption((o) => o.setName('name').setDescription('Map name').setRequired(true)))
       .addSubcommand((m) => m.setName('toggle').setDescription('Enable/disable a map.').addStringOption((o) => o.setName('name').setDescription('Map name').setRequired(true)))
       .addSubcommand((m) =>
@@ -66,7 +75,9 @@ export function registerAdminCommandDefinitions(): ReturnType<SlashCommandBuilde
           .setName('gamemode')
           .setDescription('Set the game mode for a map.')
           .addStringOption((o) => o.setName('name').setDescription('Map name').setRequired(true))
-          .addStringOption((o) => o.setName('mode').setDescription('Game mode (e.g. Gem Grab).').setRequired(false))
+          .addStringOption((o) =>
+            o.setName('mode').setDescription('Game mode (must be one of the built-in modes).').setRequired(true).addChoices(...GAME_MODE_CHOICES)
+          )
       )
   );
   scrim.addSubcommand((s) =>
@@ -250,8 +261,19 @@ export class AdminCommandHandler {
     const action = interaction.options.getSubcommand(true);
     if (action === 'add') {
       const name = interaction.options.getString('name', true);
-      const row = this.ctx.db.repos.maps.add(name);
-      await interaction.reply({ content: `Map added: **${row.name}**.`, flags: MessageFlags.Ephemeral });
+      const mode = interaction.options.getString('mode', true);
+      if (!isGameMode(mode)) {
+        await interaction.reply({
+          content: `Invalid game mode. Use one of: ${GAME_MODES.join(', ')}.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      const row = this.ctx.db.repos.maps.add(name, mode);
+      await interaction.reply({
+        content: `Map added: **${row.name}** (${row.game_mode}).`,
+        flags: MessageFlags.Ephemeral,
+      });
     } else if (action === 'remove') {
       const name = interaction.options.getString('name', true);
       const ok = this.ctx.db.repos.maps.remove(name);
@@ -265,10 +287,17 @@ export class AdminCommandHandler {
       });
     } else if (action === 'gamemode') {
       const name = interaction.options.getString('name', true);
-      const mode = interaction.options.getString('mode') ?? null;
+      const mode = interaction.options.getString('mode', true);
+      if (!isGameMode(mode)) {
+        await interaction.reply({
+          content: `Invalid game mode. Use one of: ${GAME_MODES.join(', ')}.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
       const ok = this.ctx.db.repos.maps.setGameMode(name, mode);
       await interaction.reply({
-        content: ok ? `Game mode for **${name}** set to ${mode ?? '(not configured)'}.` : `Map **${name}** not found.`,
+        content: ok ? `Game mode for **${name}** set to ${mode}.` : `Map **${name}** not found.`,
         flags: MessageFlags.Ephemeral,
       });
     }

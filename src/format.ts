@@ -103,6 +103,20 @@ export interface MatchPlayerInfo {
   elo: number;
 }
 
+export interface FaultTally {
+  reported_player_id: string;
+  count: number;
+  reasons: Record<string, number>;
+}
+
+export interface FaultDashboard {
+  reporterCount: number;
+  participantCount: number;
+  byReported: FaultTally[];
+  general: Record<string, number>;
+  dodges: Array<{ reported_player_id: string; reports: number; status: string }>;
+}
+
 export interface MatchView {
   match: MatchRow;
   teamA: MatchPlayerInfo[];
@@ -112,6 +126,7 @@ export interface MatchView {
   voteTotals: Record<string, number>;
   ranks: RankTier[];
   maps: MapRow[];
+  fault?: FaultDashboard;
 }
 
 export function matchStatusLine(match: MatchRow): string {
@@ -216,6 +231,31 @@ export function buildMatchEmbed(view: MatchView): EmbedBuilder {
   }
 
   embed.addFields({ name: 'Match Details', value: details.join('\n') });
+
+  // Live fault-report dashboard for cancelled / timed-out matches.
+  if (view.fault && (match.status === 'cancelled' || match.status === 'timed_out')) {
+    const fault = view.fault;
+    const lines: string[] = [];
+    lines.push(`**${fault.reporterCount}/${fault.participantCount}** players have reported`);
+    if (fault.reporterCount >= fault.participantCount) {
+      lines.push('All participants have reported — the report window is closed.');
+    }
+    const dodges = fault.dodges.map((d) => `⚠️ <@${d.reported_player_id}> — ${d.reports} reports (${d.status.replace(/_/g, ' ')} )`).join('\n');
+    if (dodges) lines.push(dodges);
+    const playerLines = fault.byReported
+      .map((t) => `<@${t.reported_player_id}> — **${t.count}** report${t.count === 1 ? '' : 's'}${Object.keys(t.reasons).length ? ` (${Object.entries(t.reasons).map(([k, v]) => `${k}: ${v}`).join(', ')})` : ''}`)
+      .join('\n');
+    if (playerLines) {
+      lines.push('**Player reports**');
+      lines.push(playerLines);
+    }
+    const generalEntries = Object.entries(fault.general);
+    if (generalEntries.length) {
+      lines.push(`**General** — ${generalEntries.map(([k, v]) => `${k}: ${v}`).join(', ')}`);
+    }
+    lines.push('**Rule:** if **4 players from both teams** report the same player, staff is notified for review.');
+    embed.addFields({ name: 'FAULT REPORTS', value: lines.join('\n') });
+  }
 
   // Live readiness section.
   if (match.status === 'awaiting_ready' || match.status === 'in_progress') {
